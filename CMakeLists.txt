@@ -2,11 +2,12 @@
 cmake_minimum_required(VERSION 3.10)
 
 #2. define the name of project
-project(ycsbc)
+project(NeoPMKV)
 
 #3. specify c++ compiler version
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_FLAGS "-std=c++11 -pthread")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "-std=c++17 -pthread")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if( CMAKE_BUILD_TYPE STREQUAL "Debug" )
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
@@ -15,66 +16,33 @@ else( CMAKE_BUILD_TYPE STREQUAL "Release" )
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fopenmp")
 endif( CMAKE_BUILD_TYPE STREQUAL "Debug" )
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBPMEMKV REQUIRED libpmemkv)
-pkg_check_modules(LIBPMEMOBJ REQUIRED libpmemobj)
+# find_package(PkgConfig REQUIRED)
+# pkg_check_modules(LIBPMEMKV REQUIRED libpmemkv)
+# pkg_check_modules(LIBPMEMOBJ REQUIRED libpmemobj)
 
-option(ENGINE_TREE3 "enable experimental tree3 engine" ON)
 
 
 #4. head file path
 include_directories(
-  ${PROJECT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/db
-  ${PROJECT_SOURCE_DIR}/core
-  ${PROJECT_SOURCE_DIR}/third_party/yaml-cpp/include
-  ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include
-  ${PROJECT_SOURCE_DIR}/db_impl/leveldb/include
-  ${PROJECT_SOURCE_DIR}/db_impl/rocksdb/include
-  ${PROJECT_SOURCE_DIR}/db_impl/FAST_FAIR/
-  ${LIBPMEMKV_INCLUDE_DIRS}
-  ${LIBPMEMOBJ_INCLUDE_DIRS}
+  ${PROJECT_SOURCE_DIR}/include
   )
 
 #5. third path link path
 link_directories(
-  ${PROJECT_SOURCE_DIR}/third_party/yaml-cpp/build/
-  ${PROJECT_SOURCE_DIR}/third_party/googletest/build/lib/
-  ${PROJECT_SOURCE_DIR}/db_impl/leveldb/build/
-  ${PROJECT_SOURCE_DIR}/db_impl/rocksdb/
-  ${PROJECT_SOURCE_DIR}/db_impl/FAST_FAIR/concurrent_pmdk/
-  ${LIBPMEMKV_LIBRARY_DIRS}
-  ${LIBPMEMOBJ_LIBRARY_DIRS}
   )
 
 #6. source code file path
 file(GLOB MAIN_FILE
-  ${PROJECT_SOURCE_DIR}/ycsbc.cc
+  ${PROJECT_SOURCE_DIR}/examples/example.cc
   )
 file(GLOB SOURCE_FILE
-  ${PROJECT_SOURCE_DIR}/core/*.cc
-  ${PROJECT_SOURCE_DIR}/db/*.cc
-  ${PROJECT_SOURCE_DIR}/db_impl/FAST_FAIR/concurrent_pmdk/src/*.cc
+  ${PROJECT_SOURCE_DIR}/src/*.cc
   )
 
 #7. define the executable
 add_executable(${PROJECT_NAME} ${MAIN_FILE} ${SOURCE_FILE})
 target_link_libraries(${PROJECT_NAME}
-  ${LIBPMEMOBJ_LIBRARIES}
-  pmemobj
   pthread
-  yaml-cpp
-  gtest
-  leveldb
-  rocksdb
-  pmemkv
-  fastfair
-  snappy
-  zstd
-  lz4
-  bz2
-  z
-  dl
   )
 
 #8. define gtest path
@@ -93,27 +61,10 @@ if (GTEST_FOUND)
     add_executable( ${testname} ${testsourcefile} ${SOURCE_FILE})
     target_link_libraries(${testname}
       pthread
-      pmemobj
-      yaml-cpp
       gtest
-      leveldb
-      rocksdb
-      pmemkv
-      snappy
-      zstd
-      lz4
-      bz2
-      z
-      dl
       )
     add_test(NAME ${testname} COMMAND ${testname})
   ENDFOREACH(testsourcefile ${TEST_FILE})
 endif()
 
-#10. generate compile commands
-add_custom_command(TARGET ${PROJECT_NAME}
-  POST_BUILD
-  COMMAND bash -x ${PROJECT_SOURCE_DIR}/gen_compile_commands.sh
-  VERBATIM
-  )
 

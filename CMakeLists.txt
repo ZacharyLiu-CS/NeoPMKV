@@ -19,7 +19,7 @@ endif( CMAKE_BUILD_TYPE STREQUAL "Debug" )
 # find_package(PkgConfig REQUIRED)
 # pkg_check_modules(LIBPMEMKV REQUIRED libpmemkv)
 # pkg_check_modules(LIBPMEMOBJ REQUIRED libpmemobj)
-
+find_package (fmt REQUIRED)
 
 
 #4. head file path
@@ -43,6 +43,8 @@ file(GLOB SOURCE_FILE
 add_executable(${PROJECT_NAME} ${MAIN_FILE} ${SOURCE_FILE})
 target_link_libraries(${PROJECT_NAME}
   pthread
+  pmem
+  fmt::fmt
   )
 
 #8. define gtest path
@@ -61,7 +63,9 @@ if (GTEST_FOUND)
     add_executable( ${testname} ${testsourcefile} ${SOURCE_FILE})
     target_link_libraries(${testname}
       pthread
+      pmem
       gtest
+      fmt::fmt
       )
     add_test(NAME ${testname} COMMAND ${testname})
   ENDFOREACH(testsourcefile ${TEST_FILE})

@@ -7,10 +7,9 @@
 //
 
 #include <iostream>
-#include "add.h"
 
 int main(int argc, char *argv[])
 {
-  std::cout << "Hello world"  << add(1,2) << std::endl;
+  std::cout << "Hello world"  << std::endl;
   return 0;
 }

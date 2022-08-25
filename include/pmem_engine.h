@@ -177,9 +177,9 @@ class PmemEngine {
 
   virtual Status init(PmemEngineConfig& plog_meta) = 0;
 
-  virtual Status append(PmemAddress&, ValueContent*) = 0;
+  virtual Status append(PmemAddress &pmemAddr, char *value, uint32_t size) = 0;
 
-  virtual Status read(const PmemAddress &, ValueContent*) = 0;
+  virtual Status read(const PmemAddress &readAddr, std::string& value) = 0;
 
   virtual Status seal() = 0;
 

@@ -85,8 +85,8 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
   return PmemStatuses::S201_Created_Engine;
 }
 
-Status PmemLog::append(PmemAddress &pmemAddr, ValueContent *value) {
-  PmemSize append_size = value->size + sizeof(ValueContent);
+Status PmemLog::append(PmemAddress &pmemAddr, char *value, uint32_t size) {
+  PmemSize append_size = size + sizeof(uint32_t);
   // checkout the is_sealed condition
   if (_plog_meta.is_sealed) {
     return PmemStatuses::S409_Conflict_Append_Sealed_engine;
@@ -95,31 +95,33 @@ Status PmemLog::append(PmemAddress &pmemAddr, ValueContent *value) {
   if (_plog_meta.tail_offset + append_size > _plog_meta.engine_capacity) {
     return PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
   }
-
-  _append((char *)value, append_size);
+  _append((char *)value, size);
   pmemAddr = _plog_meta.tail_offset - append_size;
   return PmemStatuses::S200_OK_Append;
 }
 
 
 
-Status PmemLog::read(const PmemAddress &readAddr, ValueContent *value) {
+Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
   // checkout the effectiveness of start_offset
   if (readAddr > _plog_meta.tail_offset) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;
   }
+  uint32_t read_size = 0;
+  _read((char*)&read_size, readAddr, sizeof(ValueContent));
+
   // checkout the effectiveness of read size
   uint64_t chunk_remaing_space =
       _plog_meta.chunk_size - readAddr % _plog_meta.chunk_size;
-  if (chunk_remaing_space < value->size) {
+  if (chunk_remaing_space < read_size) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
-  if (readAddr + value->size > _plog_meta.tail_offset) {
+  if (readAddr + read_size > _plog_meta.tail_offset) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
-  _read((char*)&value->size, readAddr, sizeof(ValueContent));
   // pass the check
-  _read((char *)value->fieldData, readAddr + sizeof(ValueContent), value->size);
+  value.reserve(read_size);
+  _read((char *)value.c_str(), readAddr + sizeof(uint32_t), read_size);
 
   return PmemStatuses::S200_OK_Found;
 }

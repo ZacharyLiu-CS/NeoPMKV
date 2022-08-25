@@ -42,9 +42,9 @@ class PmemLog : public PmemEngine {
 
   Status init(PmemEngineConfig &plog_meta) override;
 
-  Status append(PmemAddress &pmemAddr, ValueContent *value) override;
+  Status append(PmemAddress &pmemAddr, char *value, uint32_t size) override;
 
-  Status read(const PmemAddress &readAddr, ValueContent *value) override;
+  Status read(const PmemAddress &readAddr, std::string &value) override;
 
   Status seal() override;
 
@@ -58,26 +58,30 @@ class PmemLog : public PmemEngine {
     NKV_LOG_D(std::cout, "Write data: len=>{}", len);
     uint64_t chunk_remaing_space =
         _plog_meta.chunk_size - _plog_meta.tail_offset % _plog_meta.chunk_size;
-    if (chunk_remaing_space < len) {
+    uint32_t head_size = sizeof(uint32_t);
+    if (chunk_remaing_space < len + head_size) {
       _addNewChunk();
     }
 
     char *pmem_addr = _chunk_list[_active_chunk_id].pmem_addr +
-                 _plog_meta.tail_offset % _plog_meta.chunk_size;
+                      _plog_meta.tail_offset % _plog_meta.chunk_size;
+    *(uint32_t*)pmem_addr = len;
+    pmem_addr += head_size;
     if (_is_pmem) {
       _copyToPmem(pmem_addr, srcdata, len);
     } else {
       _copyToNonPmem(pmem_addr, srcdata, len);
     }
-    _plog_meta.tail_offset += len;
+    _plog_meta.tail_offset += len + head_size;
   }
 
   // private _read function to read data from given offset and length
   inline void _read(char *dst, uint64_t offset, uint64_t len) {
     NKV_LOG_D(std::cout, "Read data: offset =>{},len=>{}", offset, len);
     uint32_t chunk_id = offset / _plog_meta.chunk_size;
-    char * pmem_addr = _chunk_list[chunk_id].pmem_addr + offset % _plog_meta.chunk_size;
-    memcpy (dst, pmem_addr, len);
+    char *pmem_addr =
+        _chunk_list[chunk_id].pmem_addr + offset % _plog_meta.chunk_size;
+    memcpy(dst, pmem_addr, len);
   }
 
   // Map an existing file

@@ -44,12 +44,10 @@ TEST(AppendTest, AppendSmallData) {
   auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
   ASSERT_TRUE(status.is2xxOK());
   int value_length = 128;
-  NKV::ValueContent *value = (NKV::ValueContent *)std::malloc(
-      sizeof(NKV::ValueContent) + value_length);
-  value->size = value_length;
-  memset(value->fieldData, 43, value_length);
+  char *value = (char *)std::malloc(value_length);
+  memset(value, 43, value_length);
   NKV::PmemAddress pmem_addr;
-  auto result = engine_ptr->append(pmem_addr, value);
+  auto result = engine_ptr->append(pmem_addr, value, value_length);
   ASSERT_TRUE(result.is2xxOK());
   ASSERT_TRUE(pmem_addr == 0);
   delete engine_ptr;
@@ -62,23 +60,19 @@ TEST(ReadTest, ReadSmallData) {
   auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
   ASSERT_TRUE(status.is2xxOK());
   int value_length = 128;
-  NKV::ValueContent *old_value = (NKV::ValueContent *)std::malloc(
-      sizeof(NKV::ValueContent) + value_length);
-  old_value->size = value_length;
-  memset(old_value->fieldData, 43, value_length);
 
-  NKV::ValueContent *new_value = (NKV::ValueContent *)std::malloc(
-      sizeof(NKV::ValueContent) + value_length);
-  new_value->size = value_length;
+  char *old_value = (char *)std::malloc(value_length);
+  memset(old_value, 43, value_length);
+
+  std::string new_value;
 
   NKV::PmemAddress pmem_addr = 0;
   auto result = engine_ptr->read(pmem_addr, new_value);
-  ASSERT_EQ(memcmp(new_value->fieldData, old_value->fieldData, value_length),
+  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length),
             0);
 
   ASSERT_TRUE(result.is2xxOK());
   delete engine_ptr;
-  free(new_value);
   free(old_value);
 }
 TEST(AppendTest, AppendLargeData) {
@@ -89,18 +83,16 @@ TEST(AppendTest, AppendLargeData) {
 
   //first large write
   int value_length = 2 << 20;
-  NKV::ValueContent *value = (NKV::ValueContent *)std::malloc(
-      sizeof(NKV::ValueContent) + value_length);
-  value->size = value_length;
-  memset(value->fieldData, 44, value_length);
+  char *value = (char *)std::malloc(value_length);
+  memset(value, 44, value_length);
   NKV::PmemAddress pmem_addr;
-  auto result = engine_ptr->append(pmem_addr, value);
+  auto result = engine_ptr->append(pmem_addr, value, value_length);
   ASSERT_TRUE(result.is2xxOK());
   ASSERT_TRUE(pmem_addr == 132);
 
   // second larege write
-  memset(value->fieldData, 45, value_length);
-  result = engine_ptr->append(pmem_addr, value);
+  memset(value, 45, value_length);
+  result = engine_ptr->append(pmem_addr, value,value_length);
   ASSERT_TRUE(result.is2xxOK());
   ASSERT_EQ(pmem_addr, 2*value_length );
 
@@ -113,23 +105,18 @@ TEST(ReadTest, ReadLargeData) {
   auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
   ASSERT_TRUE(status.is2xxOK());
   int value_length = 2 << 20;
-  NKV::ValueContent *old_value = (NKV::ValueContent *)std::malloc(
-      sizeof(NKV::ValueContent) + value_length);
-  old_value->size = value_length;
-  memset(old_value->fieldData, 44, value_length);
+  char *old_value = (char *)std::malloc(value_length);
 
-  NKV::ValueContent *new_value = (NKV::ValueContent *)std::malloc(
-      sizeof(NKV::ValueContent) + value_length);
-  new_value->size = value_length;
+  memset(old_value, 44, value_length);
 
+  std::string new_value;
   NKV::PmemAddress pmem_addr = 132;
   auto result = engine_ptr->read(pmem_addr, new_value);
-  ASSERT_EQ(memcmp(new_value->fieldData, old_value->fieldData, value_length),
+  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length),
             0);
 
   ASSERT_TRUE(result.is2xxOK());
   delete engine_ptr;
-  free(new_value);
   free(old_value);
 }
 

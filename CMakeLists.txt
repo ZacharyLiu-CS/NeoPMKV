@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 #2. define the name of project
-project(NeoPMKV)
+project(neopmkv)
 
 #3. specify c++ compiler version
 set(CMAKE_CXX_STANDARD 17)
@@ -40,19 +40,27 @@ file(GLOB SOURCE_FILE
   )
 
 #7. define the executable
-add_executable(${PROJECT_NAME} ${MAIN_FILE} ${SOURCE_FILE})
-target_link_libraries(${PROJECT_NAME}
+add_executable(example ${MAIN_FILE} ${SOURCE_FILE})
+target_link_libraries(example
   pthread
   pmem
   fmt::fmt
   )
 
-#8. define gtest path
+#8. define the static library
+add_library(${PROJECT_NAME} STATIC ${SOURCE_FILE})
+target_link_libraries( ${PROJECT_NAME}
+  pthread
+  pmem
+  fmt::fmt
+  )
+
+#9. define gtest path
 set(GTEST_LIBRARY ${PROJECT_SOURCE_DIR}/third_party/googletest/build/lib)
 set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
 set(GTEST_MAIN_LIBRARY ${GTEST_LIBRARY})
 
-#9. compile test files
+#10. compile test files
 find_package(GTest)
 enable_testing()
 if (GTEST_FOUND)

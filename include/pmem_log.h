@@ -42,9 +42,9 @@ class PmemLog : public PmemEngine {
 
   Status init(PmemEngineConfig &plog_meta) override;
 
-  Status append(PmemAddress &pmemAddr, ValueContent &value) override;
+  Status append(PmemAddress &pmemAddr, ValueContent *value) override;
 
-  Status read(const PmemAddress &readAddr, ValueContent &value) override;
+  Status read(const PmemAddress &readAddr, ValueContent *value) override;
 
   Status seal() override;
 

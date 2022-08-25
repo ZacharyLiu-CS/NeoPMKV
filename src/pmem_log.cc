@@ -33,40 +33,40 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
   std::string meta_file_name = _genMetaFile();
   // check whether the metafile exists
   std::filesystem::path meteaFilePath(meta_file_name);
-  bool isMetaFileExisted = std::filesystem::exists(meteaFilePath);
+  bool is_metafile_existed = std::filesystem::exists(meteaFilePath);
   // if exists, we donn't need to create, and we just map them
-  Status metaMapRes;
+  Status meta_map_res;
   char *meta_file_addr = nullptr;
-  if (isMetaFileExisted) {
-    metaMapRes = _mapExistingFile(meta_file_name, &meta_file_addr);
+  if (is_metafile_existed) {
+    meta_map_res = _mapExistingFile(meta_file_name, &meta_file_addr);
   }
   // if not exists, we need to create those files for them
   else {
-    metaMapRes =
+    meta_map_res =
         _createThenMapFile(meta_file_name, sizeof(plog_meta), &meta_file_addr);
   }
 
   // check out the status
-  if (!metaMapRes.is2xxOK()) {
-    return metaMapRes;
+  if (!meta_map_res.is2xxOK()) {
+    return meta_map_res;
   }
   // assign the plog metadata file name and pmem_addr
   _plog_meta_file.file_name = meta_file_name;
   _plog_meta_file.pmem_addr = meta_file_addr;
 
-  if (isMetaFileExisted) {
+  if (is_metafile_existed) {
     // assign the plog metadata info from pmem space
     _plog_meta = *(PmemEngineConfig *)_plog_meta_file.pmem_addr;
     plog_meta = _plog_meta;
     for (uint64_t i = 0; i < _plog_meta.chunk_count; i++) {
-      std::string chunkName = _genNewChunk();
+      std::string chunk_name = _genNewChunk();
       char *plog_addr = nullptr;
-      auto chunkStatus = _mapExistingFile(chunkName, &plog_addr);
-      if (!chunkStatus.is2xxOK()) {
-        return chunkStatus;
+      auto chunk_status = _mapExistingFile(chunk_name, &plog_addr);
+      if (!chunk_status.is2xxOK()) {
+        return chunk_status;
       }
       _chunk_list.push_back(
-          {.file_name = std::move(chunkName), .pmem_addr = plog_addr});
+          {.file_name = std::move(chunk_name), .pmem_addr = plog_addr});
     }
     _active_chunk_id = _plog_meta.tail_offset / _plog_meta.chunk_size;
   } else {
@@ -85,25 +85,25 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
   return PmemStatuses::S201_Created_Engine;
 }
 
-Status PmemLog::append(PmemAddress &pmemAddr, ValueContent &value) {
-  pmemAddr = _plog_meta.tail_offset;
-  PmemSize appendSize = value.size;
+Status PmemLog::append(PmemAddress &pmemAddr, ValueContent *value) {
+  PmemSize append_size = value->size + sizeof(ValueContent);
   // checkout the is_sealed condition
   if (_plog_meta.is_sealed) {
     return PmemStatuses::S409_Conflict_Append_Sealed_engine;
   }
   // checkout the capacity
-  if (_plog_meta.tail_offset + appendSize > _plog_meta.engine_capacity) {
+  if (_plog_meta.tail_offset + append_size > _plog_meta.engine_capacity) {
     return PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
   }
 
-  _append((char *)value.fieldData, value.size);
+  _append((char *)value, append_size);
+  pmemAddr = _plog_meta.tail_offset - append_size;
   return PmemStatuses::S200_OK_Append;
 }
 
 
 
-Status PmemLog::read(const PmemAddress &readAddr, ValueContent &value) {
+Status PmemLog::read(const PmemAddress &readAddr, ValueContent *value) {
   // checkout the effectiveness of start_offset
   if (readAddr > _plog_meta.tail_offset) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;
@@ -111,15 +111,15 @@ Status PmemLog::read(const PmemAddress &readAddr, ValueContent &value) {
   // checkout the effectiveness of read size
   uint64_t chunk_remaing_space =
       _plog_meta.chunk_size - readAddr % _plog_meta.chunk_size;
-  if (chunk_remaing_space < value.size) {
+  if (chunk_remaing_space < value->size) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
-  if (readAddr + value.size > _plog_meta.tail_offset) {
+  if (readAddr + value->size > _plog_meta.tail_offset) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
-
+  _read((char*)&value->size, readAddr, sizeof(ValueContent));
   // pass the check
-  _read((char *)&value, readAddr, value.size);
+  _read((char *)value->fieldData, readAddr + sizeof(ValueContent), value->size);
 
   return PmemStatuses::S200_OK_Found;
 }

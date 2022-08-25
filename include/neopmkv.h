@@ -24,16 +24,14 @@ using EntryValue = PmemAddress;
 class NeoPMKV {
  public:
   NeoPMKV(std::string db_path = "/mnt/pmem0/tmp-neopmkv",
-          uint64_t chunk_size = 1ULL << 30, uint64_t db_size = 16ULL << 30) {
+          uint64_t chunk_size = 16ULL << 20, uint64_t db_size = 16ULL << 30) {
     _engine_config.chunk_size = chunk_size;
     _engine_config.engine_capacity = db_size;
     strcpy(_engine_config.engine_path, db_path.c_str());
     NKV::PmemEngine::open(_engine_config, &_engine_ptr);
   }
   ~NeoPMKV() {
-    if (std::filesystem::exists(_engine_config.engine_path)) {
-      std::filesystem::remove_all(_engine_config.engine_path);
-    }
+    delete _engine_ptr;
   }
   bool get(EntryKey key, std::string &value);
   bool put(EntryKey &key, const std::string &value);

@@ -108,7 +108,7 @@ Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;
   }
   uint32_t read_size = 0;
-  _read((char*)&read_size, readAddr, sizeof(ValueContent));
+  _read((char*)&read_size, readAddr, sizeof(uint32_t));
 
   // checkout the effectiveness of read size
   uint64_t chunk_remaing_space =
@@ -120,8 +120,9 @@ Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
   // pass the check
-  value.reserve(read_size);
-  _read((char *)value.c_str(), readAddr + sizeof(uint32_t), read_size);
+  value.resize(read_size);
+  _read((char *)value.data(), readAddr + sizeof(uint32_t), read_size);
+
 
   return PmemStatuses::S200_OK_Found;
 }

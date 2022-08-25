@@ -7,9 +7,36 @@
 //
 
 #include <iostream>
+#include <memory>
+#include <string>
+#include <utility>
 
-int main(int argc, char *argv[])
-{
-  std::cout << "Hello world"  << std::endl;
+#include "neopmkv.h"
+
+#define LOG(msg)                   \
+  do {                             \
+    std::cout << msg << std::endl; \
+  } while (0)
+
+int main(){
+
+
+  NKV::NeoPMKV * neopmkv = new NKV::NeoPMKV();
+  NKV::EntryKey key1 = 1;
+  std::string value1 = "1dsadadasdad1";
+  NKV::EntryKey key2 = 2;
+  std::string value2 = "22-09kjlksjdlajlsd";
+  neopmkv->put(key1, value1);
+  neopmkv->put(key2, value2);
+
+  std::string read_value = "";
+  read_value.clear();
+  neopmkv->get(key1, read_value);
+  LOG("value:" << read_value);
+  read_value.clear();
+  neopmkv->get(key2, read_value);
+  LOG("value:" << read_value);
+  
+  delete neopmkv;
   return 0;
 }

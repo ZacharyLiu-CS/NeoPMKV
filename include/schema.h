@@ -30,10 +30,7 @@ struct Key {
   std::string primaryKey;
 };
 
-struct ValueContent {
-  uint32_t size;
-  unsigned char fieldData[0];
-};
+using Value = std::string;
 
 struct ValuePtr {
   TimeStamp timestamp;
@@ -42,10 +39,6 @@ struct ValuePtr {
     char *pbrbAddr;
   };
   bool isHot;
-};
-
-struct Value {
-  ValueContent valueContent;
 };
 
 enum class FieldType : uint8_t {

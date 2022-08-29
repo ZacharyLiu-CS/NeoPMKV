@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "buffer_page.h"
 #include "schema.h"
 
 namespace NKV {
@@ -16,7 +17,7 @@ class BufferPage;
 class PBRB;
 
 class BufferListBySchema {
-  private:
+ private:
   Schema *ownSchema = nullptr;
   uint32_t occuBitmapSize;
   uint32_t nullableBitmapSize;
@@ -32,7 +33,9 @@ class BufferListBySchema {
   BufferPage *headPage = nullptr;
   BufferPage *tailPage = nullptr;
 
-  public:
+ public:
+  BufferPage *getHeadPage() { return headPage; }
+
   BufferListBySchema() {}
 
   BufferListBySchema(SchemaId schemaId, uint32_t pageSize,
@@ -46,7 +49,7 @@ class BufferListBySchema {
   void setOccuBitmapSize(uint32_t pageSize);
   void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize,
                uint32_t rowHeaderSize);
-  
 
+  friend class PBRB;
 };  // end of struct BufferListBySchema
 }  // end of namespace NKV

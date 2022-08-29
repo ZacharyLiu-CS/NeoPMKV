@@ -19,6 +19,7 @@
 #include <memory>
 #include <new>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 // header of this project
@@ -75,11 +76,16 @@ class PBRB {
 
   BufferPage *getPageAddr(void *rowAddr);
 
-  // 1. Header 'set' and 'get' functions.
-
   std::list<BufferPage *> getFreePageList() { return _freePageList; }
 
   uint32_t getMaxPageNumber() { return _maxPageNumber; }
+
+  // create a pageList for a SKV table according to schemaID
+  BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer = 0);
+
+  BufferPage *AllocNewPageForSchema(SchemaId schemaId);
+
+  BufferPage *AllocNewPageForSchema(SchemaId schemaId, BufferPage *pagePtr);
 
   float totalPageUsage() {
     return 1 - ((float)_freePageList.size() / (float)_maxPageNumber);
@@ -117,9 +123,9 @@ class PBRB {
                                                           Key key);
 
   // Find Cache Row Position From pagePtr to end
-  std::pair<BufferPage *, RowOffset> findCacheRowPosition(
-      uint32_t schemaID, BufferPage *pagePtr, FCRPSlowCaseStatus &stat);
-
+  std::pair<BufferPage *, RowOffset> traverseFindEmptyRow(
+      uint32_t schemaID, BufferPage *pagePtr,
+      uint32_t maxPageSearchingNum = UINT32_MAX);
   // store hot row in the empty row
   // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);
 
@@ -170,6 +176,7 @@ class PBRB {
     }
     return;
   }
+
 };
 
 }  // namespace NKV

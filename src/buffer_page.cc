@@ -9,264 +9,123 @@
 #pragma once
 
 #include "buffer_page.h"
-
+#include "logging.h"
 namespace NKV {
-
 
 // 1. Header 'set' and 'get' functions.
 
 // set (magic, 0, 2)
-void BufferPage::setMagicPage(BufferPage *pagePtr, uint16_t magic) {
+void BufferPage::setMagicPage(uint16_t magic) {
   // magic is 2 bytes;
-  pagePtr->writeToPage<uint16_t>(0, &magic, 2);
+  writeToPage<uint16_t>(0, &magic, 2);
 }
 
 // get (magic, 0, 2)
-uint16_t BufferPage::getMagicPage(const BufferPage *pagePtr) {
-  return pagePtr->readFromPage<uint16_t>(0, 2);
+uint16_t BufferPage::getMagicPage() {
+  return readFromPage<uint16_t>(0, 2);
 }
 
 // set (schemaID, 2, 4)
-void BufferPage::setSchemaIDPage(BufferPage *pagePtr, uint32_t schemaID) {
-  pagePtr->writeToPage<SchemaId>(2, &schemaID, 4);
+void BufferPage::setSchemaIDPage(uint32_t schemaID) {
+  writeToPage<SchemaId>(2, &schemaID, 4);
 }
 
 // get (schemaID, 2, 4)
-SchemaId BufferPage::getSchemaIDPage(const BufferPage *pagePtr) {
-  return pagePtr->readFromPage<uint32_t>(2, 4);
+SchemaId BufferPage::getSchemaIDPage() {
+  return readFromPage<uint32_t>(2, 4);
 }
 
 // set (schemaVer, 6, 2)
-void BufferPage::setSchemaVerPage(BufferPage *pagePtr, uint16_t schemaVer) {
-  pagePtr->writeToPage<uint16_t>(6, &schemaVer, 2);
+void BufferPage::setSchemaVerPage(uint16_t schemaVer) {
+  writeToPage<uint16_t>(6, &schemaVer, 2);
 }
 
 // get (schemaVer, 6, 2)
-uint16_t BufferPage::getSchemaVerPage(
-    const BufferPage *pagePtr) {  // schemaVer is 2 bytes
-  return pagePtr->readFromPage<uint16_t>(6, 2);
+uint16_t BufferPage::getSchemaVerPage() {  // schemaVer is 2 bytes
+  return readFromPage<uint16_t>(6, 2);
 }
 
 // get (prevPagePtr, 8, 8)
-void BufferPage::setPrevPage(BufferPage *pagePtr, BufferPage *prevPagePtr) {
-  pagePtr->writeToPage<BufferPage *>(8, &prevPagePtr, 8);
+void BufferPage::setPrevPage(BufferPage *prevPagePtr) {
+  writeToPage<BufferPage *>(8, &prevPagePtr, 8);
 }
 
 // set (prevPagePtr, 8, 8)
-BufferPage *BufferPage::getPrevPage(const BufferPage *pagePtr) {
-  return pagePtr->readFromPage<BufferPage *>(8, 8);
+BufferPage *BufferPage::getPrevPage() {
+  return readFromPage<BufferPage *>(8, 8);
 }
 
 // set (nextPagePtr, 16, 8)
-void BufferPage::setNextPage(BufferPage *pagePtr,
+void BufferPage::setNextPage(
                        BufferPage *nextPagePtr) {  // page pointer is 8 bytes
-  pagePtr->writeToPage<BufferPage *>(16, &nextPagePtr, 8);
+  writeToPage<BufferPage *>(16, &nextPagePtr, 8);
 }
 
 // get (nextPagePtr, 16, 8)
-BufferPage *BufferPage::getNextPage(const BufferPage *pagePtr) {
-  return pagePtr->readFromPage<BufferPage *>(16, 8);
+BufferPage *BufferPage::getNextPage() {
+  return readFromPage<BufferPage *>(16, 8);
 }
 
 // set (hotRowsNum, 24, 2)
-void BufferPage::setHotRowsNumPage(BufferPage *pagePtr, uint16_t hotRowsNum) {
-  pagePtr->writeToPage<uint16_t>(24, &hotRowsNum, 2);
+void BufferPage::setHotRowsNumPage(uint16_t hotRowsNum) {
+  writeToPage<uint16_t>(24, &hotRowsNum, 2);
 }
 
 // set (hotRowsNum, 24, 2)
-uint16_t BufferPage::getHotRowsNumPage(const BufferPage *pagePtr) {
-  return pagePtr->readFromPage<uint16_t>(24, 2);
+uint16_t BufferPage::getHotRowsNumPage() {
+  return readFromPage<uint16_t>(24, 2);
 }
 
-void BufferPage::setReservedHeader(BufferPage *pagePtr) {  // reserved is 38 bytes
-  memset(pagePtr->content + 26, 0, _pageHeaderSize - 26);
+void BufferPage::setReservedHeader() {  // reserved is 38 bytes
+  memset(content + 26, 0, PAGE_HEADER_SIZE - 26);
 }
 
-void BufferPage::clearPageBitMap(BufferPage *pagePtr, uint32_t occuBitmapSize,
+void BufferPage::clearPageBitMap(uint32_t occuBitmapSize,
                            uint32_t maxRowCnt) {
-  memset(pagePtr->content + _pageHeaderSize, 0, occuBitmapSize);
-  for (uint32_t rowOffset = 0; rowOffset < maxRowCnt; rowOffset++) {
-    uint32_t byteIndex = rowOffset / 8;
-    uint32_t offset = rowOffset % 8;
-    pagePtr->content[_pageHeaderSize + byteIndex] &= ~(0x1 << offset);
-  }
+  memset(content + PAGE_HEADER_SIZE, 0, occuBitmapSize);
 }
 
-void BufferPage::setRowBitMapPage(BufferPage *pagePtr, RowOffset rowOffset) {
-  auto &bmd = _bufferMap[getSchemaIDPage(pagePtr)];
+void BufferPage::setRowBitMapPage(RowOffset rowOffset) {
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  pagePtr->content[_pageHeaderSize + byteIndex] |= 0x1 << offset;
-  setHotRowsNumPage(pagePtr, getHotRowsNumPage(pagePtr) + 1);
-  bmd.curRowNum++;
+  content[PAGE_HEADER_SIZE + byteIndex] |= 0x1 << offset;
+  setHotRowsNumPage(getHotRowsNumPage() + 1);
 }
 
-void BufferPage::clearRowBitMapPage(BufferPage *pagePtr, RowOffset rowOffset) {
-  auto &bmd = _bufferMap[getSchemaIDPage(pagePtr)];
+void BufferPage::clearRowBitMapPage(RowOffset rowOffset) {
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  pagePtr->content[_pageHeaderSize + byteIndex] &= ~(0x1 << offset);
-  setHotRowsNumPage(pagePtr, getHotRowsNumPage(pagePtr) - 1);
-  bmd.curRowNum--;
+  content[PAGE_HEADER_SIZE + byteIndex] &= ~(0x1 << offset);
+  setHotRowsNumPage(getHotRowsNumPage() - 1);
 }
 
-void BufferPage::clearRowBitMap(BufferPage *pagePtr, RowOffset rowOffset) {
+void BufferPage::clearRowBitMap(RowOffset rowOffset) {
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  pagePtr->content[_pageHeaderSize + byteIndex] &= ~(0x1 << offset);
+  content[PAGE_HEADER_SIZE + byteIndex] &= ~(0x1 << offset);
 }
 
-inline bool BufferPage::isBitmapSet(BufferPage *pagePtr, RowOffset rowOffset) {
+inline bool BufferPage::isBitmapSet(RowOffset rowOffset) {
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  uint8_t bit = (pagePtr->content[_pageHeaderSize + byteIndex] >> offset) & 1;
+  uint8_t bit = (content[PAGE_HEADER_SIZE + byteIndex] >> offset) & 1;
   if (bit)
     return true;
   else
     return false;
 }
-void BufferPage::initializePage(BufferPage *pagePtr, BufferListBySchema &bmd) {
+void BufferPage::initializePage(uint32_t occuBitmapSize) {
   // Memset May Cause Performance Problems.
   // Optimized to just clear the header and occuBitMap
-  memset(pagePtr, 0, _pageHeaderSize + bmd.occuBitmapSize);
+  memset(content, 0, PAGE_HEADER_SIZE + occuBitmapSize);
   // memset(pagePtr, 0x00, sizeof(BufferPage));
-  setMagicPage(pagePtr, 0x1010);
-  setSchemaIDPage(pagePtr, -1);
-  setSchemaVerPage(pagePtr, 0);
-  setPrevPage(pagePtr, nullptr);
-  setNextPage(pagePtr, nullptr);
-  setHotRowsNumPage(pagePtr, 0);
-  setReservedHeader(pagePtr);
+  setMagicPage(0x1010);
+  setSchemaIDPage(-1);
+  setSchemaVerPage(0);
+  setPrevPage(nullptr);
+  setNextPage(nullptr);
+  setHotRowsNumPage(0);
+  setReservedHeader();
 }
 
-BufferPage *BufferPage::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
-  if (_freePageList.empty()) return nullptr;
-
-  // Get a page and set schemaMetadata.
-  BufferPage *pagePtr = _freePageList.front();
-  BufferListBySchema bmd(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize,
-                         this, pagePtr);
-  _bufferMap.insert_or_assign(schemaId, bmd);
-
-  // Initialize Page.
-  // memset(pagePtr, 0, sizeof(BufferPage));
-
-  initializePage(pagePtr, bmd);
-  setSchemaIDPage(pagePtr, schemaId);
-  setSchemaVerPage(pagePtr, schemaVer);
-
-  NKV_LOG_D(
-      std::cout,
-      "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList "
-      "size:{}, pageSize: {}, smd.rowSize: {}, _bufferMap[0].rowSize: {}",
-      schemaId, pagePtr == nullptr, _freePageList.size(), sizeof(BufferPage),
-      bmd.rowSize, _bufferMap[0].rowSize);
-
-  _freePageList.pop_front();
-
-  return pagePtr;
-}
-
-BufferPage *BufferPage::AllocNewPageForSchema(SchemaId schemaId) {
-  // al1
-  PointProfiler pointTimer;
-  pointTimer.start();
-
-  if (_freePageList.empty()) return nullptr;
-
-  BufferPage *pagePtr = _bufferMap[schemaId].headPage;
-  _bufferMap[schemaId].curPageNum++;
-
-  auto al1ns = pointTimer.end();
-
-  if (pagePtr == nullptr)
-    return createCacheForSchema(schemaId);
-  else {
-    // al2
-    pointTimer.start();
-    assert(_freePageList.size() > 0);
-    BufferPage *newPage = _freePageList.front();
-
-    // Initialize Page.
-    initializePage(newPage, _bufferMap[schemaId]);
-    setSchemaIDPage(newPage, schemaId);
-    setSchemaVerPage(newPage, _bufferMap[schemaId].ownSchema->version);
-
-    // optimize: using tailPage.
-    BufferPage *tail = _bufferMap[schemaId].tailPage;
-    // set nextpage
-    setPrevPage(newPage, tail);
-    setNextPage(newPage, nullptr);
-    setNextPage(tail, newPage);
-    _bufferMap[schemaId].tailPage = newPage;
-
-    auto al2ns = pointTimer.end();
-
-    // al3
-
-    pointTimer.start();
-    _freePageList.pop_front();
-
-    auto al3ns = pointTimer.end();
-    // K2LOG_I(log::pbrb, "Alloc new page type 1: sid: {}, sname: {},
-    // currPageNum: {}", schemaId, _bufferMap[schemaId].schema->name,
-    // _bufferMap[schemaId].curPageNum);
-    NKV_LOG_D(std::cout, "Remaining _freePageList size:{}",
-              _freePageList.size());
-    NKV_LOG_D(std::cout,
-              "Allocated page for schema: {}, page count: {}, time al1: {}, "
-              "al2: {}, al3: {}, total: {}",
-              _bufferMap[schemaId].ownSchema->name,
-              _bufferMap[schemaId].curPageNum, al1ns, al2ns, al3ns,
-              al1ns + al2ns + al3ns);
-
-    return newPage;
-  }
-}
-
-BufferPage *BufferPage::AllocNewPageForSchema(SchemaId schemaId,
-                                        BufferPage *pagePtr) {
-  // TODO: validation
-  if (_freePageList.empty()) {
-    NKV_LOG_E(std::cout, "No Free Page Now!");
-    return nullptr;
-  }
-
-  assert(_freePageList.size() > 0);
-  BufferPage *newPage = _freePageList.front();
-  _bufferMap[schemaId].curPageNum++;
-
-  // Initialize Page.
-  // memset(newPage, 0, sizeof(BufferPage));
-  initializePage(newPage, _bufferMap[schemaId]);
-  setSchemaIDPage(newPage, schemaId);
-  setSchemaVerPage(newPage, _bufferMap[schemaId].ownSchema->version);
-
-  // insert behind pagePtr
-  // pagePtr -> newPage -> nextPage;
-
-  BufferPage *nextPage = getNextPage(pagePtr);
-  // nextPtr != tail
-  if (nextPage != nullptr) {
-    setNextPage(newPage, nextPage);
-    setPrevPage(newPage, pagePtr);
-    setNextPage(pagePtr, newPage);
-    setPrevPage(nextPage, newPage);
-  } else {
-    setNextPage(newPage, nullptr);
-    setPrevPage(newPage, pagePtr);
-    setNextPage(pagePtr, newPage);
-    _bufferMap[schemaId].tailPage = newPage;
-  }
-
-  _freePageList.pop_front();
-  // K2LOG_I(log::pbrb, "Alloc new page type 2: sid: {}, sname: {},
-  // currPageNum: {}, fromPagePtr: {}", schemaId,
-  // _bufferMap[schemaId].schema->name, _bufferMap[schemaId].curPageNum, (void
-  // *)pagePtr);
-  NKV_LOG_D(std::cout, "Remaining _freePageList size:{}", _freePageList.size());
-
-  return newPage;
-}
-  
 } // end of namespace NKV

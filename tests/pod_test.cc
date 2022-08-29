@@ -16,8 +16,8 @@ struct TestStructure {
 
 TEST(AddTest, TestAddResult)
 {
-  ASSERT_EQ(true, std::is_pod<NKV::ValueContent>::value);
-  ASSERT_EQ(4, sizeof(NKV::ValueContent));
+  ASSERT_EQ(true, std::is_pod<NKV::Value>::value);
+  ASSERT_EQ(4, sizeof(NKV::Value));
 }
 
 int main(int argc, char** argv)

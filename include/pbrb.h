@@ -39,14 +39,15 @@ const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = std::map<Key, Value *>;
+using IndexerT = std::map<Key, ValuePtr *>;
+using IndexerIterator = IndexerT::iterator;
 
 class PBRB {
  private:
   uint32_t _maxPageNumber;
   uint32_t _pageSize = pageSize;
-  uint32_t _pageHeaderSize = 64;
-  uint32_t _rowHeaderSize = sizeof(RowHeader);
+  uint32_t _pageHeaderSize = PAGE_HEADER_SIZE;
+  uint32_t _rowHeaderSize = ROW_HEADER_SIZE;
 
   uint32_t _maxPageSearchingNum;
   std::string _fcrpOutputFileName;
@@ -103,7 +104,7 @@ class PBRB {
                            RowOffset rowOffset, ValuePtr *vPtr, void *nodePtr);
 
   // find an empty slot between the beginOffset and endOffset in the page
-  RowOffset findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr,
+  inline RowOffset findEmptySlotInPage(BufferListBySchema& blbs, BufferPage *pagePtr,
                                 RowOffset beginOffset = 0,
                                 RowOffset endOffset = UINT32_MAX);
 
@@ -120,17 +121,15 @@ class PBRB {
 
   // Find the page pointer and row offset to cache cold row
   std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID,
-                                                          Key key);
+                                                          IndexerIterator iter);
 
-  // Find Cache Row Position From pagePtr to end
+  // Traverse cache list to find empty row from pagePtr 
   std::pair<BufferPage *, RowOffset> traverseFindEmptyRow(
-      uint32_t schemaID, BufferPage *pagePtr,
+      uint32_t schemaID, BufferPage *pagePtr = nullptr,
       uint32_t maxPageSearchingNum = UINT32_MAX);
-  // store hot row in the empty row
-  // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);
 
   // return pagePtr and rowOffset.
-  std::pair<BufferPage *, RowOffset> findRowByAddr(void *rowAddr);
+  std::pair<BufferPage *, RowOffset> findPageAndRowByAddr(void *rowAddr);
 
   // evict row and return cold addr.
   PmemAddress evictRow(void *rowAddr);

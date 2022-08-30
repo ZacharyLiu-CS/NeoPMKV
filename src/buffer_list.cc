@@ -8,17 +8,19 @@
 //
 
 #include "buffer_list.h"
-#include "pbrb.h"
 #include "buffer_page.h"
+#include "pbrb.h"
 
 namespace NKV {
 
 void BufferListBySchema::setNullBitmapSize(uint32_t fieldNumber) {
-  nullableBitmapSize = (fieldNumber - 1) / 8 + 1;
+  nullableBitmapSize = 0;
+  // nullableBitmapSize = (fieldNumber - 1) / 8 + 1;
 }
 
 void BufferListBySchema::setOccuBitmapSize(uint32_t pageSize) {
-  occuBitmapSize = (pageSize / rowSize - 1) / 8 + 1;
+  occuBitmapSize = sizeof(OccupancyBitmap);
+  // occuBitmapSize = (pageSize / rowSize - 1) / 8 + 1;
 }
 void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
                                  uint32_t pageHeaderSize,
@@ -47,8 +49,12 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
   }
 
   // set rowSize
-  // rowSize = currRowOffset;
-  rowSize = currRowOffset + sizeof(size_t);
+  // rowSize = currRowOffset (align to 8 bytes)
+  rowSize = ((currRowOffset - 1) / 8 + 1) * 8;
+
+  NKV_LOG_D(std::cout,
+            "PageHeaderSize: {}, OccupancyBitmapSize: {}, RowSize: {}",
+            pageHeaderSize, occuBitmapSize, rowSize);
   setOccuBitmapSize(pageSize);
   maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
 }

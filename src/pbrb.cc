@@ -13,7 +13,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer,
            uint32_t maxPageSearchNum) {
   // check headerSizes
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
-  static_assert(ROW_HEADER_SIZE == 36, "ROW_HEADER_SIZE != 32");
+  static_assert(ROW_HEADER_SIZE == 36, "ROW_HEADER_SIZE != 36");
   // initialization
   _watermark = *wm;
   _maxPageNumber = maxPageNumber;
@@ -40,46 +40,19 @@ BufferPage *PBRB::getPageAddr(void *rowAddr) {
   return (BufferPage *)((uint64_t)rowAddr & ~mask);
 }
 
-RowOffset PBRB::findEmptySlotInPage(uint32_t maxRowCnt, BufferPage *pagePtr,
-                                    RowOffset beginOffset,
-                                    RowOffset endOffset) {
-  return pagePtr->getFirstZeroBit(maxRowCnt);
-}
-
-std::pair<BufferPage *, RowOffset> PBRB::traverseFindEmptyRow(
-    uint32_t schemaID, BufferPage *pagePtr, uint32_t maxPageSearchingNum) {
-  if (maxPageSearchingNum == 0) {
-    NKV_LOG_E(std::cerr, "maxPageSearchingNum must > 0, adjusted to 1");
-  }
-
-  BufferPage *travPagePtr = pagePtr;
-  BufferListBySchema &blbs = _bufferMap[schemaID];
-  uint32_t visitedPageNum = 1;
-  while (visitedPageNum < maxPageSearchingNum && travPagePtr != nullptr) {
-    RowOffset rowOff = findEmptySlotInPage(blbs.maxRowCnt, travPagePtr);
-    if (rowOff != UINT32_MAX) {
-      return std::make_pair(travPagePtr, rowOff);
-    }
-    visitedPageNum++;
-    travPagePtr = travPagePtr->getNextPage();
-  }
-  return std::make_pair(nullptr, 0);
-}
-
-
 BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   if (_freePageList.empty()) return nullptr;
 
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = _freePageList.front();
-  BufferListBySchema bmd(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize,
-                         this, pagePtr);
-  _bufferMap.insert_or_assign(schemaId, bmd);
+  BufferListBySchema blbs(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize,
+                          this, pagePtr);
+  _bufferMap.insert_or_assign(schemaId, blbs);
 
   // Initialize Page.
   // memset(pagePtr, 0, sizeof(BufferPage));
 
-  pagePtr->initializePage(bmd.occuBitmapSize);
+  pagePtr->initializePage(blbs.occuBitmapSize);
   pagePtr->setSchemaIDPage(schemaId);
   pagePtr->setSchemaVerPage(schemaVer);
 
@@ -88,7 +61,7 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
       "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList "
       "size:{}, pageSize: {}, smd.rowSize: {}, _bufferMap[0].rowSize: {}",
       schemaId, pagePtr == nullptr, _freePageList.size(), sizeof(BufferPage),
-      bmd.rowSize, _bufferMap[0].rowSize);
+      blbs.rowSize, _bufferMap[schemaId].rowSize);
 
   _freePageList.pop_front();
 
@@ -100,10 +73,21 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
   PointProfiler pointTimer;
   pointTimer.start();
 
-  if (_freePageList.empty()) return nullptr;
+  if (_freePageList.empty()) 
+  {
+    NKV_LOG_E(std::cerr, "No free page!");
+    return nullptr;
+  }
 
-  BufferPage *pagePtr = _bufferMap[schemaId].headPage;
-  _bufferMap[schemaId].curPageNum++;
+  if (_bufferMap.find(schemaId) == _bufferMap.end())
+  {
+    NKV_LOG_E(std::cerr, "Didn't find sid: {} in _bufferMap when alloc new page.", schemaId);
+    return nullptr;
+  }
+
+  BufferListBySchema &blbs = _bufferMap[schemaId];
+  BufferPage *pagePtr = blbs.headPage;
+  blbs.curPageNum++;
 
   auto al1ns = pointTimer.end();
 
@@ -116,17 +100,17 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     BufferPage *newPage = _freePageList.front();
 
     // Initialize Page.
-    newPage->initializePage(_bufferMap[schemaId].occuBitmapSize);
+    newPage->initializePage(blbs.occuBitmapSize);
     newPage->setSchemaIDPage(schemaId);
-    newPage->setSchemaVerPage(_bufferMap[schemaId].ownSchema->version);
+    newPage->setSchemaVerPage(blbs.ownSchema->version);
 
     // optimize: using tailPage.
-    BufferPage *tail = _bufferMap[schemaId].tailPage;
+    BufferPage *tail = blbs.tailPage;
     // set nextpage
     newPage->setPrevPage(tail);
     newPage->setNextPage(nullptr);
     tail->setNextPage(newPage);
-    _bufferMap[schemaId].tailPage = newPage;
+    blbs.tailPage = newPage;
 
     auto al2ns = pointTimer.end();
 
@@ -144,8 +128,8 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     NKV_LOG_D(std::cout,
               "Allocated page for schema: {}, page count: {}, time al1: {}, "
               "al2: {}, al3: {}, total: {}",
-              _bufferMap[schemaId].ownSchema->name,
-              _bufferMap[schemaId].curPageNum, al1ns, al2ns, al3ns,
+              blbs.ownSchema->name,
+              blbs.curPageNum, al1ns, al2ns, al3ns,
               al1ns + al2ns + al3ns);
 
     return newPage;
@@ -174,7 +158,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
   // pagePtr -> newPage -> nextPage;
 
   BufferPage *nextPage = pagePtr->getNextPage();
-  // nextPtr != tail
+  // nextPagePtr != tail
   if (nextPage != nullptr) {
     newPage->setNextPage(nextPage);
     newPage->setPrevPage(pagePtr);
@@ -196,5 +180,201 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
 
   return newPage;
 }
-  
+
+// return pagePtr and rowOffset.
+std::pair<BufferPage *, RowOffset> PBRB::findPageAndRowByAddr(void *rowAddr) {
+  BufferPage *pagePtr = getPageAddr(rowAddr);
+  uint32_t offset = (uint64_t)rowAddr & mask;
+  SchemaId sid = pagePtr->getSchemaIDPage();
+  BufferListBySchema &blbs = _bufferMap[sid];
+  RowOffset rowOff =
+      (offset - blbs.fieldsInfo[0].fieldOffset - _pageHeaderSize) /
+      blbs.rowSize;
+  if ((offset - blbs.fieldsInfo[0].fieldOffset - _pageHeaderSize) %
+          blbs.rowSize !=
+      0)
+    NKV_LOG_I(std::cout, "WARN: offset maybe wrong!");
+  return std::make_pair(pagePtr, rowOff);
+}
+
+// Find position functions.
+
+//
+
+// @brief Find first empty slot in BufferPage pageptr
+// @return rowOffset (UINT32_MAX for not found).
+inline RowOffset PBRB::findEmptySlotInPage(BufferListBySchema &blbs,
+                                           BufferPage *pagePtr,
+                                           RowOffset beginOffset,
+                                           RowOffset endOffset) {
+  return pagePtr->getFirstZeroBit(blbs.maxRowCnt);
+}
+
+// Find first empty slot in linked list start with pagePtr.
+std::pair<BufferPage *, RowOffset> PBRB::traverseFindEmptyRow(
+    uint32_t schemaID, BufferPage *pagePtr, uint32_t maxPageSearchingNum) {
+  if (maxPageSearchingNum == 0) {
+    NKV_LOG_E(std::cerr, "maxPageSearchingNum must > 0, adjusted to 1");
+  }
+
+  // Default: Traverse from headPage.
+  if (pagePtr == nullptr) {
+    BufferListBySchema &blbs = _bufferMap[schemaID];
+    pagePtr = blbs.headPage;
+    if (pagePtr == nullptr) {
+      NKV_LOG_E(std::cerr,
+                "[Schema: {}, sid: {}:] blbs.headPage == nullptr, Aborted "
+                "traversing.",
+                blbs.ownSchema->name, blbs.ownSchema->schemaId);
+    }
+  }
+
+  BufferPage *travPagePtr = pagePtr;
+  BufferListBySchema &blbs = _bufferMap[schemaID];
+  uint32_t visitedPageNum = 1;
+  while (visitedPageNum < maxPageSearchingNum && travPagePtr != nullptr) {
+    RowOffset rowOff = findEmptySlotInPage(blbs, travPagePtr);
+    if (rowOff != UINT32_MAX) {
+      return std::make_pair(travPagePtr, rowOff);
+    }
+    visitedPageNum++;
+    travPagePtr = travPagePtr->getNextPage();
+  }
+
+  // Didn't find en empty slot: need to allocate a new page.
+  BufferPage *newPage = AllocNewPageForSchema(schemaID, pagePtr);
+
+  // Current Stragegy: return the first slot of new page.
+  return std::make_pair(newPage, 0);
+}
+
+//
+std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
+    uint32_t schemaID, IndexerIterator iter) {
+  if (iter == _indexer->end()) {
+    NKV_LOG_E(std::cerr, "iter == _indexer->end()");
+    return std::make_pair(nullptr, 0);
+  }
+
+  auto bmIter = _bufferMap.find(schemaID);
+
+  if (_bufferMap.find(schemaID) == _bufferMap.end()) {
+    NKV_LOG_E(std::cerr, "Cannot find buffer list info with schemaID: {}",
+              schemaID);
+    return std::make_pair(nullptr, 0);
+  }
+
+  auto &blbs = bmIter->second;
+  // Search in neighboring keys
+  uint32_t maxIdxSearchNum = 5;
+  IndexerIterator prevIter = iter;
+  IndexerIterator nextIter = iter;
+
+  BufferPage *prevPagePtr = nullptr;
+  RowOffset prevOff = UINT32_MAX;
+  for (int i = 0; i < maxIdxSearchNum; i++) {
+    if (prevIter != _indexer->begin()) {
+      prevIter--;
+      auto valuePtr = prevIter->second;
+      if (valuePtr->isHot) {
+        RowAddr rowAddr = valuePtr->addr.pbrbAddr;
+        auto retVal = findPageAndRowByAddr(rowAddr);
+        prevPagePtr = retVal.first;
+        prevOff = retVal.second;
+      }
+    } else
+      break;
+  }
+
+  BufferPage *nextPagePtr = nullptr;
+  RowOffset nextOff = UINT32_MAX;
+  for (int i = 0; i < maxIdxSearchNum && nextIter != _indexer->end(); i++) {
+    nextIter++;
+    if (nextIter == _indexer->end()) break;
+    auto valuePtr = nextIter->second;
+    if (valuePtr->isHot) {
+      RowAddr rowAddr = valuePtr->addr.pbrbAddr;
+      auto retVal = findPageAndRowByAddr(rowAddr);
+      nextPagePtr = retVal.first;
+      nextOff = retVal.second;
+    }
+  }
+
+  std::pair<BufferPage *, RowOffset> result;
+  // Case 1: nullptr <- key -> nullptr
+  if (prevPagePtr == nullptr && nextPagePtr == nullptr) {
+    result = traverseFindEmptyRow(schemaID);
+  }
+  // Case 2.1: prevPagePtr <- key -> nullptr findEmptySlotInPage(maxRowCnt,
+  // prevPagePtr, beginOffset, UINT32_MAX);
+  else if (prevPagePtr != nullptr && nextPagePtr == nullptr) {
+    RowOffset rowOff = findEmptySlotInPage(blbs, prevPagePtr, prevOff);
+    if (rowOff == UINT32_MAX)
+      result = traverseFindEmptyRow(schemaID, prevPagePtr->getNextPage());
+    else
+      result = std::make_pair(prevPagePtr, rowOff);
+  }
+  // Case 2.2: nullptr <- key -> nextPagePtr findEmptySlotInPage(maxRowCnt,
+  // nextPagePtr, 0, endOffset);
+
+  else if (prevPagePtr == nullptr && nextPagePtr != nullptr) {
+    RowOffset rowOff = findEmptySlotInPage(blbs, nextPagePtr, prevOff);
+    if (rowOff == UINT32_MAX)
+      result = traverseFindEmptyRow(schemaID, nextPagePtr->getNextPage());
+    else
+      result = std::make_pair(nextPagePtr, rowOff);
+  }
+
+  // Case 3: prevPagePtr <- key -> nextPagePtr
+  else {
+    // Case 3.1: Same Page:  findEmptySlotInPage(maxRowCnt, prevPagePtr,
+    // beginOffset, endOffset);
+    if (prevPagePtr == nextPagePtr) {
+      RowOffset beginOff = 0, endOff = UINT32_MAX;
+      if (prevOff < nextOff) {
+        beginOff = prevOff;
+        endOff = nextOff;
+      }
+
+      else {
+        beginOff = nextOff;
+        endOff = prevOff;
+      }
+      RowOffset rowOff =
+          findEmptySlotInPage(blbs, prevPagePtr, beginOff, endOff);
+      if (rowOff == UINT32_MAX)
+        result = traverseFindEmptyRow(schemaID, prevPagePtr->getNextPage());
+      else
+        result = std::make_pair(prevPagePtr, rowOff);
+    }
+    // Case 3.2: Diff Page:  findEmptySlotInPage(maxRowCnt,
+    // lowerPtr);
+    else {
+      uint32_t prevHotNum = prevPagePtr->getHotRowsNumPage();
+      uint32_t nextHotNum = nextPagePtr->getHotRowsNumPage();
+
+      // Case 3.2.1
+      if (prevHotNum <= nextHotNum) {
+        RowOffset rowOff = findEmptySlotInPage(blbs, prevPagePtr);
+        if (rowOff == UINT32_MAX)
+          result = traverseFindEmptyRow(schemaID, prevPagePtr->getNextPage());
+        else
+          result = std::make_pair(prevPagePtr, rowOff);
+      }
+
+      // Case 3.2.2
+      else {
+        RowOffset rowOff = findEmptySlotInPage(blbs, nextPagePtr);
+        if (rowOff == UINT32_MAX)
+          result = traverseFindEmptyRow(schemaID, nextPagePtr->getNextPage());
+        else
+          result = std::make_pair(nextPagePtr, rowOff);
+      }
+    }
+  }
+
+  NKV_LOG_E(std::cerr, "Unexpected work flow in findCacheRowPosition()!");
+  return std::make_pair(nullptr, 0);
+}
+
 }  // namespace NKV

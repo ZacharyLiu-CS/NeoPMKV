@@ -6,8 +6,6 @@
 //  Copyright (c) 2022 zhenliu <liuzhenm@mail.ustc.edu.cn>.
 //
 
-#pragma once
-
 #include "buffer_page.h"
 #include "logging.h"
 namespace NKV {

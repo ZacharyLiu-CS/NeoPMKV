@@ -7,12 +7,12 @@
 //
 
 #pragma once
-#include <iostream>
+#include <assert.h>
 #include <cstdint>
 #include <cstring>
-#include <assert.h>
-#include "schema.h"
+#include <iostream>
 #include "logging.h"
+#include "schema.h"
 
 #define PAGE_HEADER_SIZE sizeof(PageHeader)
 #define ROW_HEADER_SIZE sizeof(RowHeader)
@@ -22,7 +22,6 @@ const int pageSize = 4 * 1024;  // 4KB
 const long long mask = 0x0000000000000FFF;  // 0x0000000000000FFF;
 
 using RowOffset = uint32_t;
-using RowAddr = void *;
 using CRC32 = uint32_t;
 
 class BufferPage;
@@ -111,8 +110,7 @@ class BufferPage {
 
   void setReservedHeader();
 
-  void clearPageBitMap(uint32_t occuBitmapSize,
-                       uint32_t maxRowCnt);
+  void clearPageBitMap(uint32_t occuBitmapSize, uint32_t maxRowCnt);
 
   // 1.2 Row get & set functions.
 
@@ -160,13 +158,13 @@ class BufferPage {
   // Input: bitmapSize (byte)
   // Output: offset [Position of first 0 in bitmap, UINT32_MAX represent no
   // empty slot]
-  RowOffset getFirstZeroBit(uint32_t maxRowNumOfPage,
-                              uint32_t beginOffset = 0,
-                              uint32_t endOffset = UINT32_MAX) {
+  RowOffset getFirstZeroBit(uint32_t maxRowNumOfPage, uint32_t beginOffset = 0,
+                            uint32_t endOffset = UINT32_MAX) {
+    if (maxRowNumOfPage == getHotRowsNumPage()) return UINT32_MAX;
+    if (endOffset > maxRowNumOfPage) endOffset = maxRowNumOfPage;
     if (beginOffset > endOffset)
       NKV_LOG_E(std::cerr, "beginOffset: {} > endOffset: {}", beginOffset,
                 endOffset);
-    if (endOffset == UINT32_MAX) endOffset = maxRowNumOfPage;
 
     // No __builtin implementation:
     uint32_t beginByte = beginOffset / 8;

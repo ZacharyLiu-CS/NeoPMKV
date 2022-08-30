@@ -23,6 +23,7 @@ using SchemaVer = uint16_t;
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
 
+using RowAddr = void *;
 const uint32_t ERRMASK = 1 << 31;
 
 struct Key {
@@ -34,10 +35,10 @@ using Value = std::string;
 
 struct ValuePtr {
   TimeStamp timestamp;
-  union addr {
+  union Addr {
     PmemAddress pmemAddr;
-    char *pbrbAddr;
-  };
+    RowAddr pbrbAddr;
+  } addr;
   bool isHot;
 };
 

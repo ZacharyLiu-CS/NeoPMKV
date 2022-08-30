@@ -44,6 +44,7 @@ class BufferListBySchema {
     bePBRBPtr = pbrbPtr;
     headPage = headPagePtr;
     tailPage = headPagePtr;
+    setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
   }
   void setNullBitmapSize(uint32_t fieldNumber);
   void setOccuBitmapSize(uint32_t pageSize);

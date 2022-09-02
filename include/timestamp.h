@@ -12,6 +12,5 @@
 namespace NKV {
 struct TimeStamp {
   uint64_t txn_nanoseconds;
-  uint64_t unused;
 };
 }

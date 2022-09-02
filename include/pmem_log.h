@@ -43,7 +43,7 @@ class PmemLog : public PmemEngine {
 
   Status init(PmemEngineConfig &plog_meta) override;
 
-  Status append(PmemAddress &pmemAddr, char *value, uint32_t size) override;
+  Status append(PmemAddress &pmemAddr, const char *value, uint32_t size) override;
 
   Status read(const PmemAddress &readAddr, std::string &value) override;
 

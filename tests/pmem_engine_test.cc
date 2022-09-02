@@ -68,8 +68,7 @@ TEST(ReadTest, ReadSmallData) {
 
   NKV::PmemAddress pmem_addr = 0;
   auto result = engine_ptr->read(pmem_addr, new_value);
-  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length),
-            0);
+  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length), 0);
 
   ASSERT_TRUE(result.is2xxOK());
   delete engine_ptr;
@@ -81,7 +80,7 @@ TEST(AppendTest, AppendLargeData) {
   auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
   ASSERT_TRUE(status.is2xxOK());
 
-  //first large write
+  // first large write
   int value_length = 2 << 20;
   char *value = (char *)std::malloc(value_length);
   memset(value, 44, value_length);
@@ -92,9 +91,9 @@ TEST(AppendTest, AppendLargeData) {
 
   // second larege write
   memset(value, 45, value_length);
-  result = engine_ptr->append(pmem_addr, value,value_length);
+  result = engine_ptr->append(pmem_addr, value, value_length);
   ASSERT_TRUE(result.is2xxOK());
-  ASSERT_EQ(pmem_addr, 2*value_length );
+  ASSERT_EQ(pmem_addr, 2 * value_length);
 
   delete engine_ptr;
   free(value);
@@ -112,8 +111,7 @@ TEST(ReadTest, ReadLargeData) {
   std::string new_value;
   NKV::PmemAddress pmem_addr = 132;
   auto result = engine_ptr->read(pmem_addr, new_value);
-  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length),
-            0);
+  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length), 0);
 
   ASSERT_TRUE(result.is2xxOK());
   delete engine_ptr;
@@ -128,6 +126,23 @@ TEST(EndTest, CleanTestFile) {
     status = true;
   }
   ASSERT_TRUE(status == true);
+}
+TEST(MultiThreadTest, ConcurrentAccessPmemLog) {
+  NKV::PmemEngineConfig plogConfig;
+  plogConfig.chunk_size = 2ull << 20;
+  strcpy(plogConfig.engine_path, testBaseDir.c_str());
+  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
+  ASSERT_TRUE(status.is2xxOK());
+  int value_length = 60;
+  int num_threads = 16;
+  auto writeToPmemLog = [=](int num_ops) {
+    std::string value;
+    value.resize(value_length);
+    NKV::PmemAddress addr = 0;
+    engine_ptr->append(addr, value.c_str(), value_length);
+  };
+
+  delete engine_ptr;
 }
 
 int main(int argc, char **argv) {

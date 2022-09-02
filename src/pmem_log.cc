@@ -85,7 +85,7 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
   return PmemStatuses::S201_Created_Engine;
 }
 
-Status PmemLog::append(PmemAddress &pmemAddr, char *value, uint32_t size) {
+Status PmemLog::append(PmemAddress &pmemAddr, const char *value, uint32_t size) {
   PmemSize append_size = size + sizeof(uint32_t);
   // checkout the is_sealed condition
   if (_plog_meta.is_sealed) {

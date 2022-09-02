@@ -12,8 +12,8 @@ namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer,
            uint32_t maxPageSearchNum) {
   // check headerSizes
-  static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
-  static_assert(ROW_HEADER_SIZE == 36, "ROW_HEADER_SIZE != 36");
+  // static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
+  // static_assert(ROW_HEADER_SIZE == 36, "ROW_HEADER_SIZE != 36");
   // initialization
   _watermark = *wm;
   _maxPageNumber = maxPageNumber;

@@ -17,7 +17,7 @@
 #define PAGE_HEADER_SIZE sizeof(PageHeader)
 #define ROW_HEADER_SIZE sizeof(RowHeader)
 namespace NKV {
-const int pageSize = 4 * 1024;  // 4KB
+constexpr int pageSize = 4 * 1024;  // 4KB
 
 const long long mask = 0x0000000000000FFF;  // 0x0000000000000FFF;
 

@@ -75,8 +75,8 @@ class PBRB {
        uint32_t maxPageSearchNum);
   ~PBRB();
 
-  bool read(const RowAddr addr,SchemaId schemaid, std::string &value);
-  bool write(SchemaId schemaid, const std::string &value,IndexerIterator iter);
+  bool read(TimeStamp timestamp, const RowAddr addr,SchemaId schemaid, std::string &value);
+  bool write(TimeStamp timestamp, SchemaId schemaid, const std::string &value,IndexerIterator iter);
 
   BufferPage *getPageAddr(void *rowAddr);
 

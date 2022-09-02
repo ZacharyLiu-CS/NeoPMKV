@@ -23,6 +23,7 @@ class BufferListBySchema {
   uint32_t nullableBitmapSize;
   uint32_t maxRowCnt;
   std::vector<FieldMetaData> fieldsInfo;
+  uint32_t valueSize = 0;
   uint32_t rowSize;
 
   uint32_t curPageNum = 0;

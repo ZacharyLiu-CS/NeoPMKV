@@ -13,7 +13,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer,
            uint32_t maxPageSearchNum) {
   // check headerSizes
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
-  static_assert(ROW_HEADER_SIZE == 36, "ROW_HEADER_SIZE != 36");
+  static_assert(ROW_HEADER_SIZE == 28, "ROW_HEADER_SIZE != 28");
   // initialization
   _watermark = *wm;
   _maxPageNumber = maxPageNumber;
@@ -73,15 +73,15 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
   PointProfiler pointTimer;
   pointTimer.start();
 
-  if (_freePageList.empty()) 
-  {
+  if (_freePageList.empty()) {
     NKV_LOG_E(std::cerr, "No free page!");
     return nullptr;
   }
 
-  if (_bufferMap.find(schemaId) == _bufferMap.end())
-  {
-    NKV_LOG_E(std::cerr, "Didn't find sid: {} in _bufferMap when alloc new page.", schemaId);
+  if (_bufferMap.find(schemaId) == _bufferMap.end()) {
+    NKV_LOG_E(std::cerr,
+              "Didn't find sid: {} in _bufferMap when alloc new page.",
+              schemaId);
     return nullptr;
   }
 
@@ -128,8 +128,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     NKV_LOG_D(std::cout,
               "Allocated page for schema: {}, page count: {}, time al1: {}, "
               "al2: {}, al3: {}, total: {}",
-              blbs.ownSchema->name,
-              blbs.curPageNum, al1ns, al2ns, al3ns,
+              blbs.ownSchema->name, blbs.curPageNum, al1ns, al2ns, al3ns,
               al1ns + al2ns + al3ns);
 
     return newPage;
@@ -145,14 +144,27 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
   }
 
   assert(_freePageList.size() > 0);
+  if (_bufferMap.find(schemaId) == _bufferMap.end()) {
+    NKV_LOG_E(std::cerr,
+              "Didn't find sid: {} in _bufferMap when alloc new page.",
+              schemaId);
+    return nullptr;
+  }
+
+  if (pagePtr == nullptr) {
+    NKV_LOG_E(std::cerr, "specified nullptr as start pointer!");
+    return nullptr;
+  }
+
+  BufferListBySchema &blbs = _bufferMap[schemaId];
   BufferPage *newPage = _freePageList.front();
-  _bufferMap[schemaId].curPageNum++;
+  blbs.curPageNum++;
 
   // Initialize Page.
   // memset(newPage, 0, sizeof(BufferPage));
-  newPage->initializePage(_bufferMap[schemaId].occuBitmapSize);
+  newPage->initializePage(blbs.occuBitmapSize);
   newPage->setSchemaIDPage(schemaId);
-  newPage->setSchemaVerPage(_bufferMap[schemaId].ownSchema->version);
+  newPage->setSchemaVerPage(blbs.ownSchema->version);
 
   // insert behind pagePtr
   // pagePtr -> newPage -> nextPage;
@@ -168,7 +180,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
     newPage->setNextPage(nullptr);
     newPage->setPrevPage(pagePtr);
     pagePtr->setNextPage(newPage);
-    _bufferMap[schemaId].tailPage = newPage;
+    blbs.tailPage = newPage;
   }
 
   _freePageList.pop_front();
@@ -195,6 +207,14 @@ std::pair<BufferPage *, RowOffset> PBRB::findPageAndRowByAddr(void *rowAddr) {
       0)
     NKV_LOG_I(std::cout, "WARN: offset maybe wrong!");
   return std::make_pair(pagePtr, rowOff);
+}
+
+RowAddr PBRB::getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff) {
+  SchemaId sid = pagePtr->getSchemaIDPage();
+  BufferListBySchema &blbs = _bufferMap[sid];
+  uint32_t offset =
+      _pageHeaderSize + blbs.fieldsInfo[0].fieldOffset + rowOff * blbs.rowSize;
+  return (uint8_t *)pagePtr + offset;
 }
 
 // Find position functions.
@@ -375,6 +395,65 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 
   NKV_LOG_E(std::cerr, "Unexpected work flow in findCacheRowPosition()!");
   return std::make_pair(nullptr, 0);
+}
+
+bool PBRB::read(TimeStamp timestamp, const RowAddr addr, SchemaId schemaid,
+                Value &value) {
+  BufferPage *pagePtr = getPageAddr(addr);
+  BufferListBySchema &blbs = _bufferMap[schemaid];
+  value = pagePtr->getValueRow(addr, blbs.rowSize);
+  // Validation:
+  if (pagePtr->getTimestampRow(addr).gt(timestamp)) {
+    // Expired: Somebody updated the row.
+    // TODO: Handle this case
+    return false;
+  } else {
+    pagePtr->setTimestampRow(addr, timestamp);
+    return true;
+  }
+}
+bool PBRB::write(TimeStamp timestamp, SchemaId schemaid, const Value &value,
+                 IndexerIterator iter) {
+  auto valuePtr = iter->second;
+
+  // Check value size:
+  BufferListBySchema &blbs = _bufferMap[schemaid];
+  if (blbs.valueSize != value.size()) {
+    NKV_LOG_E(std::cerr, "Value size: {} != blbs.valueSize: {}, Aborted",
+              value.size(), blbs.valueSize);
+    return false;
+  }
+
+  //  2. Find a position.
+  auto retVal = findCacheRowPosition(schemaid, iter);
+  BufferPage *pagePtr = retVal.first;
+  RowOffset rowOffset = retVal.second;
+  RowAddr rowAddr = getAddrByPageAndRow(pagePtr, rowOffset);
+
+  // 3. copy row.
+  // copy header:
+  {
+    std::mutex lock_;
+    std::lock_guard<std::mutex> lockGuard(lock_);
+    pagePtr->setTimestampRow(rowAddr, timestamp);
+    pagePtr->setPlogAddrRow(rowAddr, valuePtr->addr.pmemAddr);
+    pagePtr->setKVNodeAddrRow(rowAddr, valuePtr);
+    // copy row content:
+    pagePtr->setValueRow(rowAddr, value);
+    pagePtr->setRowBitMapPage(rowOffset);
+    blbs.curRowNum++;
+  }
+  // 4. Check consistency
+  if (valuePtr->timestamp.ne(timestamp)) {
+    // Rollback
+    pagePtr->clearRowBitMapPage(rowOffset);
+    blbs.curRowNum--;
+    NKV_LOG_D(std::cout, "PBRB: Write operation timestamp conflict. Rollback");
+    return false;
+  }
+  NKV_LOG_D(std::cout, "PBRB: Successfully write row [ts:{} value: {}]",
+            timestamp, value);
+  return true;
 }
 
 }  // namespace NKV

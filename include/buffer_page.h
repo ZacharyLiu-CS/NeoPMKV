@@ -44,7 +44,7 @@ struct RowHeader {
   char CRC[4];
   TimeStamp timestamp;
   PmemAddress pmemAddr;
-  char *kvNodeAddr;
+  ValuePtr *kvNodeAddr;
 } __attribute__((packed));
 
 class BufferPage {
@@ -137,11 +137,23 @@ class BufferPage {
   }
 
   // KVNodeAddr: (RowAddr + 20, 8)
-  char *getKVNodeAddrRow(RowAddr rAddr) {
+  ValuePtr *getKVNodeAddrRow(RowAddr rAddr) {
     return ((RowHeader *)rAddr)->kvNodeAddr;
   }
-  void setKVNodeAddrRow(RowAddr rAddr, char *kvNodeAddr) {
+  void setKVNodeAddrRow(RowAddr rAddr, ValuePtr *kvNodeAddr) {
     ((RowHeader *)rAddr)->kvNodeAddr = kvNodeAddr;
+  }
+
+  // Value:
+  Value getValueRow(RowAddr rAddr, uint32_t valueSize) {
+    char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
+    std::string value = std::string(valueAddr, valueSize);
+    return value;
+  }
+
+  void setValueRow(RowAddr rAddr, const Value &value) {
+    char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
+    memcpy(valueAddr, value.c_str(), value.size());
   }
 
   // 2. Occupancy Bitmap functions.

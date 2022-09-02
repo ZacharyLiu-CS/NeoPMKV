@@ -95,9 +95,6 @@ class PBRB {
   // move cold row in pAddress to PBRB and insert hot address into KVNode
   void *cacheColdRow(PmemAddress pAddress, Key key);
 
-  // Copy memory from plog to (pagePtr, rowOffset)
-  void *cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset,
-                         PmemAddress pAddress);
 
   // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
   void *cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr,

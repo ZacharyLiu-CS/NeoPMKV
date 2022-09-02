@@ -18,6 +18,7 @@
 #include <vector>
 #include "logging.h"
 #include "pmem_engine.h"
+#include "schema.h"
 
 namespace NKV {
 
@@ -54,25 +55,30 @@ class PmemLog : public PmemEngine {
 
  private:
   // private _append function to write srcdata to plog
-  inline void _append(char *srcdata, size_t len) {
+  inline PmemAddress _append(char *srcdata, size_t len) {
     NKV_LOG_D(std::cout, "Write data: len=>{}", len);
-    uint64_t chunk_remaing_space =
-        _plog_meta.chunk_size - _plog_meta.tail_offset % _plog_meta.chunk_size;
+    _mutex.lock();
+    uint64_t now_tail_offset = _plog_meta.tail_offset;
     uint32_t head_size = sizeof(uint32_t);
+    uint64_t chunk_remaing_space =
+        _plog_meta.chunk_size - now_tail_offset % _plog_meta.chunk_size;
     if (chunk_remaing_space < len + head_size) {
       _addNewChunk();
     }
+    _plog_meta.tail_offset += len + head_size;
+    _mutex.unlock();
 
     char *pmem_addr = _chunk_list[_active_chunk_id].pmem_addr +
-                      _plog_meta.tail_offset % _plog_meta.chunk_size;
-    *(uint32_t*)pmem_addr = len;
+                      now_tail_offset % _plog_meta.chunk_size;
+    *(uint32_t *)pmem_addr = len;
     pmem_addr += head_size;
     if (_is_pmem) {
       _copyToPmem(pmem_addr, srcdata, len);
     } else {
       _copyToNonPmem(pmem_addr, srcdata, len);
     }
-    _plog_meta.tail_offset += len + head_size;
+    // atomic modify the tail_offset variable
+    return now_tail_offset;
   }
 
   // private _read function to read data from given offset and length
@@ -127,7 +133,6 @@ class PmemLog : public PmemEngine {
     return PmemStatuses::S201_Created_File;
   }
   inline Status _addNewChunk() {
-    std::lock_guard<std::mutex> guard(_mutex);
     std::string chunk_name = _genNewChunk();
     char *chunk_addr = nullptr;
     auto chunk_status =

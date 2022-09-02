@@ -95,8 +95,7 @@ Status PmemLog::append(PmemAddress &pmemAddr, char *value, uint32_t size) {
   if (_plog_meta.tail_offset + append_size > _plog_meta.engine_capacity) {
     return PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
   }
-  _append((char *)value, size);
-  pmemAddr = _plog_meta.tail_offset - append_size;
+  pmemAddr =_append((char *)value, size);
   return PmemStatuses::S200_OK_Append;
 }
 

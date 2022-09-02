@@ -75,8 +75,8 @@ class PBRB {
        uint32_t maxPageSearchNum);
   ~PBRB();
 
-  bool read(TimeStamp timestamp, const RowAddr addr,SchemaId schemaid, std::string &value);
-  bool write(TimeStamp timestamp, SchemaId schemaid, const std::string &value,IndexerIterator iter);
+  bool read(TimeStamp timestamp, const RowAddr addr, SchemaId schemaid, Value &value);
+  bool write(TimeStamp timestamp, SchemaId schemaid, const Value &value, IndexerIterator iter);
 
   BufferPage *getPageAddr(void *rowAddr);
 
@@ -98,15 +98,15 @@ class PBRB {
   // move cold row in pAddress to PBRB and insert hot address into KVNode
   void *cacheColdRow(PmemAddress pAddress, Key key);
 
-
   // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
   void *cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr,
                            RowOffset rowOffset, ValuePtr *vPtr, void *nodePtr);
 
   // find an empty slot between the beginOffset and endOffset in the page
-  inline RowOffset findEmptySlotInPage(BufferListBySchema& blbs, BufferPage *pagePtr,
-                                RowOffset beginOffset = 0,
-                                RowOffset endOffset = UINT32_MAX);
+  inline RowOffset findEmptySlotInPage(BufferListBySchema &blbs,
+                                       BufferPage *pagePtr,
+                                       RowOffset beginOffset = 0,
+                                       RowOffset endOffset = UINT32_MAX);
 
   // find an empty slot in the page
 
@@ -123,14 +123,14 @@ class PBRB {
   std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID,
                                                           IndexerIterator iter);
 
-  // Traverse cache list to find empty row from pagePtr 
+  // Traverse cache list to find empty row from pagePtr
   std::pair<BufferPage *, RowOffset> traverseFindEmptyRow(
       uint32_t schemaID, BufferPage *pagePtr = nullptr,
       uint32_t maxPageSearchingNum = UINT32_MAX);
 
   // return pagePtr and rowOffset.
   std::pair<BufferPage *, RowOffset> findPageAndRowByAddr(void *rowAddr);
-
+  RowAddr getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff);
   // evict row and return cold addr.
   PmemAddress evictRow(void *rowAddr);
 
@@ -175,7 +175,6 @@ class PBRB {
     }
     return;
   }
-
 };
 
 }  // namespace NKV

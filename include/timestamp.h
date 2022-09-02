@@ -12,5 +12,23 @@
 namespace NKV {
 struct TimeStamp {
   uint64_t txn_nanoseconds;
+  bool eq(TimeStamp ts) {
+    return this->txn_nanoseconds == ts.txn_nanoseconds;
+  }
+  bool ne(TimeStamp ts) {
+    return this->txn_nanoseconds != ts.txn_nanoseconds;
+  }
+  bool gt(TimeStamp ts) {
+    return this->txn_nanoseconds > ts.txn_nanoseconds;
+  }
+  bool ge(TimeStamp ts) {
+    return this->txn_nanoseconds >= ts.txn_nanoseconds;
+  }
+  bool lt(TimeStamp ts) {
+    return this->txn_nanoseconds < ts.txn_nanoseconds;
+  }
+  bool le(TimeStamp ts) {
+    return this->txn_nanoseconds <= ts.txn_nanoseconds;
+  }
 };
-}
+}  // namespace NKV

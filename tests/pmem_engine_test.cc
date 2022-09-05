@@ -88,7 +88,7 @@ TEST(AppendTest, AppendLargeData) {
   NKV::PmemAddress pmem_addr;
   auto result = engine_ptr->append(pmem_addr, value, value_length);
   ASSERT_TRUE(result.is2xxOK());
-  ASSERT_TRUE(pmem_addr == 132);
+  ASSERT_EQ(pmem_addr, 132);
 
   // second larege write
   memset(value, 45, value_length);
@@ -136,7 +136,7 @@ TEST(MultiThreadTest, ConcurrentAccessPmemLog) {
   ASSERT_TRUE(status.is2xxOK());
   int value_length = 60;
   int num_threads = 16;
-  int num_ops = 1ull << 10;
+  int num_ops = 1ull << 13;
   auto writeToPmemLog = [=](int num_ops) {
     std::string value;
     for (auto i = 0; i < num_ops; i++) {

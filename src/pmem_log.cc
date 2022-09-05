@@ -59,16 +59,19 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
     _plog_meta = *(PmemEngineConfig *)_plog_meta_file.pmem_addr;
     plog_meta = _plog_meta;
     for (uint64_t i = 0; i < _plog_meta.chunk_count; i++) {
-      std::string chunk_name = _genNewChunk();
+      std::string chunk_name = _genNewChunkName();
       char *plog_addr = nullptr;
       auto chunk_status = _mapExistingFile(chunk_name, &plog_addr);
+      _active_chunk_id.fetch_add(1);
       if (!chunk_status.is2xxOK()) {
         return chunk_status;
       }
       _chunk_list.push_back(
           {.file_name = std::move(chunk_name), .pmem_addr = plog_addr});
     }
-    _active_chunk_id.store(_plog_meta.tail_offset / _plog_meta.chunk_size);
+
+    _tail_offset.store(_plog_meta.tail_offset);
+    _active_chunk_id.store(_tail_offset.load() / _plog_meta.chunk_size);
   } else {
     _plog_meta = plog_meta;
     // write metadata to metaFile
@@ -93,7 +96,7 @@ Status PmemLog::append(PmemAddress &pmemAddr, const char *value,
     return PmemStatuses::S409_Conflict_Append_Sealed_engine;
   }
   // checkout the capacity
-  if (_plog_meta.tail_offset + append_size > _plog_meta.engine_capacity) {
+  if (_tail_offset.load() + append_size > _plog_meta.engine_capacity) {
     return PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
   }
   pmemAddr = _append((char *)value, size);
@@ -102,7 +105,7 @@ Status PmemLog::append(PmemAddress &pmemAddr, const char *value,
 
 Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
   // checkout the effectiveness of start_offset
-  if (readAddr > _plog_meta.tail_offset) {
+  if (readAddr > _tail_offset.load()) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;
   }
   uint32_t read_size = 0;
@@ -114,7 +117,7 @@ Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
   if (chunk_remaing_space < read_size) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
-  if (readAddr + read_size > _plog_meta.tail_offset) {
+  if (readAddr + read_size > _tail_offset.load()) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
   // pass the check
@@ -132,9 +135,9 @@ Status PmemLog::seal() {
   }
 }
 uint64_t PmemLog::getFreeSpace() {
-  return _plog_meta.engine_capacity - _plog_meta.tail_offset;
+  return _plog_meta.engine_capacity - _tail_offset.load();
 }
 
-uint64_t PmemLog::getUsedSpace() { return _plog_meta.tail_offset; };
+uint64_t PmemLog::getUsedSpace() { return _tail_offset.load(); };
 
 }  // namespace NKV

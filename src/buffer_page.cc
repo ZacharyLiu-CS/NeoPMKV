@@ -7,6 +7,7 @@
 //
 
 #include "buffer_page.h"
+#include "gtest/gtest_prod.h"
 #include "logging.h"
 namespace NKV {
 
@@ -19,9 +20,7 @@ void BufferPage::setMagicPage(uint16_t magic) {
 }
 
 // get (magic, 0, 2)
-uint16_t BufferPage::getMagicPage() {
-  return readFromPage<uint16_t>(0, 2);
-}
+uint16_t BufferPage::getMagicPage() { return readFromPage<uint16_t>(0, 2); }
 
 // set (schemaID, 2, 4)
 void BufferPage::setSchemaIDPage(uint32_t schemaID) {
@@ -29,9 +28,7 @@ void BufferPage::setSchemaIDPage(uint32_t schemaID) {
 }
 
 // get (schemaID, 2, 4)
-SchemaId BufferPage::getSchemaIDPage() {
-  return readFromPage<uint32_t>(2, 4);
-}
+SchemaId BufferPage::getSchemaIDPage() { return readFromPage<uint32_t>(2, 4); }
 
 // set (schemaVer, 6, 2)
 void BufferPage::setSchemaVerPage(uint16_t schemaVer) {
@@ -55,7 +52,7 @@ BufferPage *BufferPage::getPrevPage() {
 
 // set (nextPagePtr, 16, 8)
 void BufferPage::setNextPage(
-                       BufferPage *nextPagePtr) {  // page pointer is 8 bytes
+    BufferPage *nextPagePtr) {  // page pointer is 8 bytes
   writeToPage<BufferPage *>(16, &nextPagePtr, 8);
 }
 
@@ -78,32 +75,31 @@ void BufferPage::setReservedHeader() {  // reserved is 38 bytes
   memset(content + 26, 0, PAGE_HEADER_SIZE - 26);
 }
 
-void BufferPage::clearPageBitMap(uint32_t occuBitmapSize,
-                           uint32_t maxRowCnt) {
+void BufferPage::clearPageBitMap(uint32_t occuBitmapSize) {
   memset(content + PAGE_HEADER_SIZE, 0, occuBitmapSize);
 }
 
-void BufferPage::setRowBitMapPage(RowOffset rowOffset) {
+bool BufferPage::setRowBitMapPage(RowOffset rowOffset) {
+  if (isBitmapSet(rowOffset))
+    return false;
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
   content[PAGE_HEADER_SIZE + byteIndex] |= 0x1 << offset;
   setHotRowsNumPage(getHotRowsNumPage() + 1);
+  return true;
 }
 
-void BufferPage::clearRowBitMapPage(RowOffset rowOffset) {
+bool BufferPage::clearRowBitMapPage(RowOffset rowOffset) {
+  if (!isBitmapSet(rowOffset))
+    return false;
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
   content[PAGE_HEADER_SIZE + byteIndex] &= ~(0x1 << offset);
   setHotRowsNumPage(getHotRowsNumPage() - 1);
+  return true;
 }
 
-void BufferPage::clearRowBitMap(RowOffset rowOffset) {
-  uint32_t byteIndex = rowOffset / 8;
-  uint32_t offset = rowOffset % 8;
-  content[PAGE_HEADER_SIZE + byteIndex] &= ~(0x1 << offset);
-}
-
-inline bool BufferPage::isBitmapSet(RowOffset rowOffset) {
+bool BufferPage::isBitmapSet(RowOffset rowOffset) {
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
   uint8_t bit = (content[PAGE_HEADER_SIZE + byteIndex] >> offset) & 1;
@@ -118,7 +114,7 @@ void BufferPage::initializePage(uint32_t occuBitmapSize) {
   memset(content, 0, PAGE_HEADER_SIZE + occuBitmapSize);
   // memset(pagePtr, 0x00, sizeof(BufferPage));
   setMagicPage(0x1010);
-  setSchemaIDPage(-1);
+  setSchemaIDPage(0);
   setSchemaVerPage(0);
   setPrevPage(nullptr);
   setNextPage(nullptr);
@@ -126,4 +122,4 @@ void BufferPage::initializePage(uint32_t occuBitmapSize) {
   setReservedHeader();
 }
 
-} // end of namespace NKV
+}  // end of namespace NKV

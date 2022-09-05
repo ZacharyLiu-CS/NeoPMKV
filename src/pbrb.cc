@@ -439,7 +439,7 @@ bool PBRB::write(TimeStamp timestamp, SchemaId schemaid, const Value &value,
     pagePtr->setPlogAddrRow(rowAddr, valuePtr->addr.pmemAddr);
     pagePtr->setKVNodeAddrRow(rowAddr, valuePtr);
     // copy row content:
-    pagePtr->setValueRow(rowAddr, value);
+    pagePtr->setValueRow(rowAddr, value, blbs.valueSize);
     pagePtr->setRowBitMapPage(rowOffset);
     blbs.curRowNum++;
   }

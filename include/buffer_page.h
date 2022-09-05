@@ -14,8 +14,11 @@
 #include "logging.h"
 #include "schema.h"
 
+#include "gtest/gtest_prod.h"
+
 #define PAGE_HEADER_SIZE sizeof(PageHeader)
 #define ROW_HEADER_SIZE sizeof(RowHeader)
+#define OCCUPANCY_BITMAP_SIZE sizeof(OccupancyBitmap)
 namespace NKV {
 const int pageSize = 4 * 1024;  // 4KB
 
@@ -110,7 +113,7 @@ class BufferPage {
 
   void setReservedHeader();
 
-  void clearPageBitMap(uint32_t occuBitmapSize, uint32_t maxRowCnt);
+  void clearPageBitMap(uint32_t occuBitmapSize);
 
   // 1.2 Row get & set functions.
 
@@ -151,20 +154,33 @@ class BufferPage {
     return value;
   }
 
-  void setValueRow(RowAddr rAddr, const Value &value) {
+  // need to
+  bool setValueRow(RowAddr rAddr, const Value &value, uint32_t valueSize) {
+    if (valueSize != value.size()) {
+      NKV_LOG_E(
+          std::cerr,
+          "Provided value: \"{}\".size() = {}, conflict with valueSize: {}",
+          value, value.size(), valueSize);
+      return false;
+    }
     char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
     memcpy(valueAddr, value.c_str(), value.size());
+    return true;
   }
 
+  // test helper function: get rAddr by rowOffset:
+  inline RowAddr _getRowAddr(RowOffset rowOffset, uint32_t rowSize) {
+    return (RowAddr)(content + PAGE_HEADER_SIZE + OCCUPANCY_BITMAP_SIZE +
+                     rowSize * rowOffset);
+  }
   // 2. Occupancy Bitmap functions.
 
   // a bit for a row, page size = 64KB, row size = 128B, there are at most 512
   // rows, so 512 bits=64 Bytes is sufficient
-  void setRowBitMapPage(RowOffset rowOffset);
+  bool setRowBitMapPage(RowOffset rowOffset);
 
-  void clearRowBitMapPage(RowOffset rowOffset);
-  void clearRowBitMap(RowOffset rowOffset);
-  inline bool isBitmapSet(RowOffset rowOffset);
+  bool clearRowBitMapPage(RowOffset rowOffset);
+  bool isBitmapSet(RowOffset rowOffset);
 
   // Return the idx of first slot (0) in Bitmap
   // Input: bitmapSize (byte)
@@ -182,7 +198,7 @@ class BufferPage {
     uint32_t beginByte = beginOffset / 8;
     uint32_t endByte = endOffset / 8;
 
-    for (uint32_t byteIdx = beginOffset; byteIdx < endOffset; byteIdx++) {
+    for (uint32_t byteIdx = beginByte; byteIdx <= endByte; byteIdx++) {
       uint8_t beginBit = 0, endBit = 8;
       // First Byte
       if (byteIdx == beginByte) beginBit = beginOffset % 8;
@@ -191,11 +207,13 @@ class BufferPage {
 
       uint8_t byteContent = content[PAGE_HEADER_SIZE + byteIdx];
       // Fix Byte
-      uint8_t byteMask = (1 << beginBit - 1) | ~(1 << endBit - 1);
+      uint8_t byteMask = ((1 << beginBit) - 1) | ~((1 << endBit) - 1);
       byteContent |= byteMask;
+      NKV_LOG_I(std::cout, "ByteIdx: {}, byteMask: {}, byteContent: {}",
+                byteIdx, byteMask, byteContent);
       if (byteContent != UINT8_MAX)
         for (uint8_t bitIdx = beginBit; bitIdx < endBit; bitIdx++)
-          if (byteContent >> bitIdx & (uint8_t)1 == 0)
+          if (((byteContent >> bitIdx) & (uint8_t)1) == 0)
             return byteIdx * 8 + bitIdx;
     }
 
@@ -208,6 +226,9 @@ class BufferPage {
   void initializePage(uint32_t occuBitmapSize);
 
   friend class PBRB;
+
+  FRIEND_TEST(BufferPageTest, Initialization);
+  FRIEND_TEST(BufferPageTest, BasicFunctions);
 };
 
 }  // namespace NKV

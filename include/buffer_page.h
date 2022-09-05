@@ -20,7 +20,7 @@
 #define ROW_HEADER_SIZE sizeof(RowHeader)
 #define OCCUPANCY_BITMAP_SIZE sizeof(OccupancyBitmap)
 namespace NKV {
-const int pageSize = 4 * 1024;  // 4KB
+constexpr int pageSize = 4 * 1024;  // 4KB
 
 const long long mask = 0x0000000000000FFF;  // 0x0000000000000FFF;
 
@@ -187,39 +187,7 @@ class BufferPage {
   // Output: offset [Position of first 0 in bitmap, UINT32_MAX represent no
   // empty slot]
   RowOffset getFirstZeroBit(uint32_t maxRowNumOfPage, uint32_t beginOffset = 0,
-                            uint32_t endOffset = UINT32_MAX) {
-    if (maxRowNumOfPage == getHotRowsNumPage()) return UINT32_MAX;
-    if (endOffset > maxRowNumOfPage) endOffset = maxRowNumOfPage;
-    if (beginOffset > endOffset)
-      NKV_LOG_E(std::cerr, "beginOffset: {} > endOffset: {}", beginOffset,
-                endOffset);
-
-    // No __builtin implementation:
-    uint32_t beginByte = beginOffset / 8;
-    uint32_t endByte = endOffset / 8;
-
-    for (uint32_t byteIdx = beginByte; byteIdx <= endByte; byteIdx++) {
-      uint8_t beginBit = 0, endBit = 8;
-      // First Byte
-      if (byteIdx == beginByte) beginBit = beginOffset % 8;
-      // Last Byte
-      if (byteIdx == endByte) endBit = endOffset % 8;
-
-      uint8_t byteContent = content[PAGE_HEADER_SIZE + byteIdx];
-      // Fix Byte
-      uint8_t byteMask = ((1 << beginBit) - 1) | ~((1 << endBit) - 1);
-      byteContent |= byteMask;
-      NKV_LOG_I(std::cout, "ByteIdx: {}, byteMask: {}, byteContent: {}",
-                byteIdx, byteMask, byteContent);
-      if (byteContent != UINT8_MAX)
-        for (uint8_t bitIdx = beginBit; bitIdx < endBit; bitIdx++)
-          if (((byteContent >> bitIdx) & (uint8_t)1) == 0)
-            return byteIdx * 8 + bitIdx;
-    }
-
-    // No empty slot
-    return UINT32_MAX;
-  }
+                            uint32_t endOffset = UINT32_MAX);
   // 3. Operations.
   // 3.1 Initialize a schema.
 

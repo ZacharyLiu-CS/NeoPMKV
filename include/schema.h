@@ -146,3 +146,30 @@ class SchemaUMap {
 };
 
 }  // namespace NKV
+
+template <> struct fmt::formatter<NKV::Key> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    return ctx.begin();
+  }
+
+  // Formats the point p using the parsed format specification (presentation)
+  // stored in this formatter.
+  template <typename FormatContext>
+  auto format(const NKV::Key& key, FormatContext& ctx) const -> decltype(ctx.out()) {
+    // ctx.out() is an output iterator to write to.
+    return  fmt::format_to(ctx.out(), "schemaid:{},pkey:{}",key.schemaId, key.primaryKey);
+  }
+};
+template <> struct fmt::formatter<NKV::Value> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    return ctx.begin();
+  }
+
+  // Formats the point p using the parsed format specification (presentation)
+  // stored in this formatter.
+  template <typename FormatContext>
+  auto format(const NKV::Value& value, FormatContext& ctx) const -> decltype(ctx.out()) {
+    // ctx.out() is an output iterator to write to.
+    return  fmt::format_to(ctx.out(), "{}", value);
+  }
+};

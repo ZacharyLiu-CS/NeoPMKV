@@ -68,7 +68,7 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
       _chunk_list.push_back(
           {.file_name = std::move(chunk_name), .pmem_addr = plog_addr});
     }
-    _active_chunk_id = _plog_meta.tail_offset / _plog_meta.chunk_size;
+    _active_chunk_id.store(_plog_meta.tail_offset / _plog_meta.chunk_size);
   } else {
     _plog_meta = plog_meta;
     // write metadata to metaFile
@@ -85,7 +85,8 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
   return PmemStatuses::S201_Created_Engine;
 }
 
-Status PmemLog::append(PmemAddress &pmemAddr, const char *value, uint32_t size) {
+Status PmemLog::append(PmemAddress &pmemAddr, const char *value,
+                       uint32_t size) {
   PmemSize append_size = size + sizeof(uint32_t);
   // checkout the is_sealed condition
   if (_plog_meta.is_sealed) {
@@ -95,11 +96,9 @@ Status PmemLog::append(PmemAddress &pmemAddr, const char *value, uint32_t size) 
   if (_plog_meta.tail_offset + append_size > _plog_meta.engine_capacity) {
     return PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
   }
-  pmemAddr =_append((char *)value, size);
+  pmemAddr = _append((char *)value, size);
   return PmemStatuses::S200_OK_Append;
 }
-
-
 
 Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
   // checkout the effectiveness of start_offset
@@ -107,7 +106,7 @@ Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;
   }
   uint32_t read_size = 0;
-  _read((char*)&read_size, readAddr, sizeof(uint32_t));
+  _read((char *)&read_size, readAddr, sizeof(uint32_t));
 
   // checkout the effectiveness of read size
   uint64_t chunk_remaing_space =
@@ -122,10 +121,8 @@ Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
   value.resize(read_size);
   _read((char *)value.data(), readAddr + sizeof(uint32_t), read_size);
 
-
   return PmemStatuses::S200_OK_Found;
 }
-
 
 Status PmemLog::seal() {
   if (_plog_meta.is_sealed == false) {

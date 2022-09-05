@@ -139,7 +139,7 @@ struct PmemEngineConfig {
   uint64_t tail_offset = 0;
 
   // control chunk size, default 80MB
-  uint64_t chunk_size = 80ULL << 20;
+  uint64_t chunk_size = 64ULL << 20;
 
   // number of current chunks
   uint64_t chunk_count = 0;

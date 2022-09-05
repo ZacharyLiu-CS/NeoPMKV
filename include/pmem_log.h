@@ -43,7 +43,8 @@ class PmemLog : public PmemEngine {
 
   Status init(PmemEngineConfig &plog_meta) override;
 
-  Status append(PmemAddress &pmemAddr, const char *value, uint32_t size) override;
+  Status append(PmemAddress &pmemAddr, const char *value,
+                uint32_t size) override;
 
   Status read(const PmemAddress &readAddr, std::string &value) override;
 
@@ -56,19 +57,21 @@ class PmemLog : public PmemEngine {
  private:
   // private _append function to write srcdata to plog
   inline PmemAddress _append(char *srcdata, size_t len) {
-    NKV_LOG_D(std::cout, "Write data: len=>{}", len);
+    // NKV_LOG_D(std::cout, "Write data: len=>{} to offset=>{}, activate chunk
+    // id=>{}", len, _plog_meta.tail_offset, _active_chunk_id.load());
     _mutex.lock();
     uint64_t now_tail_offset = _plog_meta.tail_offset;
-    uint32_t head_size = sizeof(uint32_t);
+    constexpr uint32_t head_size = sizeof(uint32_t);
     uint64_t chunk_remaing_space =
-        _plog_meta.chunk_size - now_tail_offset % _plog_meta.chunk_size;
+        (1 + _active_chunk_id.load()) * _plog_meta.chunk_size - now_tail_offset;
     if (chunk_remaing_space < len + head_size) {
       _addNewChunk();
+      now_tail_offset = _plog_meta.tail_offset;
     }
     _plog_meta.tail_offset += len + head_size;
     _mutex.unlock();
 
-    char *pmem_addr = _chunk_list[_active_chunk_id].pmem_addr +
+    char *pmem_addr = _chunk_list[_active_chunk_id.load()].pmem_addr +
                       now_tail_offset % _plog_meta.chunk_size;
     *(uint32_t *)pmem_addr = len;
     pmem_addr += head_size;
@@ -134,6 +137,8 @@ class PmemLog : public PmemEngine {
   }
   inline Status _addNewChunk() {
     std::string chunk_name = _genNewChunk();
+    NKV_LOG_D(std::cout, "generate new chunk, now active chunk id:{}",
+              _active_chunk_id.load());
     char *chunk_addr = nullptr;
     auto chunk_status =
         _createThenMapFile(chunk_name, _plog_meta.chunk_size, &chunk_addr);
@@ -150,7 +155,7 @@ class PmemLog : public PmemEngine {
   inline std::string _genNewChunk() {
     _active_chunk_id.fetch_add(1);
     return fmt::format("{}/{}_{}.plog", _plog_meta.engine_path,
-                       _plog_meta.plog_id, _active_chunk_id);
+                       _plog_meta.plog_id, _active_chunk_id.load());
   }
 
   // generate the metadata file name

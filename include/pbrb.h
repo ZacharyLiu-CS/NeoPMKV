@@ -43,6 +43,13 @@ using IndexerT = std::map<Key, ValuePtr *>;
 using IndexerIterator = IndexerT::iterator;
 
 class PBRB {
+ public:
+  // constructor
+  PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer, SchemaUMap *umap,
+       uint32_t maxPageSearchNum = UINT32_MAX);
+  // dtor
+  ~PBRB();
+
  private:
   uint32_t _maxPageNumber;
   uint32_t _pageSize = pageSize;
@@ -64,19 +71,11 @@ class PBRB {
   uint32_t _evictCnt = 0;
 
   SchemaAllocator _schemaAllocator;
-  SchemaUMap _schemaUMap;
+  SchemaUMap *_schemaUMap;
 
   friend class BufferListBySchema;
   std::map<SchemaId, BufferListBySchema> _bufferMap;
   TimeStamp _watermark;
-
-  // constructor
-  PBRB(int maxPageNumer, TimeStamp *wm, IndexerT *indexer,
-       uint32_t maxPageSearchNum);
-  ~PBRB();
-
-  bool read(TimeStamp timestamp, const RowAddr addr, SchemaId schemaid, Value &value);
-  bool write(TimeStamp timestamp, SchemaId schemaid, const Value &value, IndexerIterator iter);
 
   BufferPage *getPageAddr(void *rowAddr);
 
@@ -175,6 +174,35 @@ class PBRB {
     }
     return;
   }
+
+ private:
+  std::mutex vPtrUpdateLock_;
+  std::mutex writeLock_;
+
+  bool _updateValuePtr(TimeStamp newTS, ValuePtr *vPtr, RowAddr rAddr,
+                       bool isHot) {
+    std::lock_guard<std::mutex> lockGuard(vPtrUpdateLock_);
+    if (vPtr->timestamp.ge(newTS)) {
+      NKV_LOG_E(std::cerr,
+                "Someone has updated valuePtr with: ts = {}. Our ts = {}, "
+                "might be expired",
+                vPtr->timestamp, newTS);
+      return false;
+    }
+    vPtr->addr.pbrbAddr = rAddr;
+    vPtr->timestamp = newTS;
+    vPtr->isHot = true;
+    return true;
+  }
+
+ public:
+  bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
+            SchemaId schemaid, Value &value);
+  bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
+             const Value &value, IndexerIterator iter);
+
+  // GTEST
+  FRIEND_TEST(PBRBTest, Test01);
 };
 
 }  // namespace NKV

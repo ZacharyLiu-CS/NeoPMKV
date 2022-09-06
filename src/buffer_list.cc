@@ -26,20 +26,20 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
                                  uint32_t pageHeaderSize,
                                  uint32_t rowHeaderSize) {
   // read from Schema
-  Schema *res = bePBRBPtr->_schemaUMap.find(schemaId);
+  Schema *res = sUMap->find(schemaId);
   if (res == nullptr) return;
 
   ownSchema = res;
+  setOccuBitmapSize(pageSize);
   setNullBitmapSize(ownSchema->fields.size());
 
   uint32_t currRowOffset = rowHeaderSize + nullableBitmapSize;
   valueSize = 0;
   // Set Metadata
   for (size_t i = 0; i < ownSchema->fields.size(); i++) {
-    FieldType currFT = ownSchema->fields[i].type;
     FieldMetaData fieldObj;
 
-    fieldObj.fieldSize = FTSize[(uint8_t)(currFT)];
+    fieldObj.fieldSize = ownSchema->fields[i].size;
     valueSize += fieldObj.fieldSize;
     fieldObj.fieldOffset = currRowOffset;
     fieldObj.isNullable = false;

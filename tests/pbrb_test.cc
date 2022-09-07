@@ -36,7 +36,7 @@ TEST(PBRBTest, Test01) {
   vp1->timestamp = timestamp;
   vp1->addr.pmemAddr = 0x12345678;
   vp1->isHot = false;
-  indexer.insert({k1, vp1});
+  indexer.insert({k1, *vp1});
 
   std::string info[2] = {"Read k1, Cache k1(Cold)", "Read k1 (hot)"};
   // Step 1: Read k1, Cache k1(Cold)
@@ -46,7 +46,7 @@ TEST(PBRBTest, Test01) {
     IndexerIterator idxIter = indexer.find(k1);
     ASSERT_NE(idxIter, indexer.end());
     if (idxIter != indexer.end()) {
-      ValuePtr *vPtr = idxIter->second;
+      ValuePtr *vPtr = &idxIter->second;
       if (step == 1) ASSERT_EQ(vPtr->isHot, false);
       if (step == 2) ASSERT_EQ(vPtr->isHot, true);
       if (vPtr->isHot) {
@@ -71,8 +71,8 @@ TEST(PBRBTest, Test01) {
         Value pbrb_v1 = Value((const char *)(&v1), 4);
         TimeStamp ts_step1;
         ts_step1.getNow();
-        bool status = pbrb.write(vPtr->timestamp, ts_step1, k1.schemaId,
-                                 pbrb_v1, idxIter);
+        bool status = pbrb.syncwrite(vPtr->timestamp, ts_step1, k1.schemaId,
+                                     pbrb_v1, idxIter);
         ASSERT_EQ(status, true);
         ASSERT_EQ(vPtr->isHot, true);
       }
@@ -159,10 +159,10 @@ TEST(PBRBTest, Test02) {
     uint64_t pk = *(uint64_t *)(v.substr(0, 8).data());
     TimeStamp ts;
     ts.getNow();
-    ValuePtr *vPtr = new ValuePtr;
-    vPtr->addr.pmemAddr = (PmemAddress)pk;
-    vPtr->isHot = false;
-    vPtr->timestamp = ts;
+    ValuePtr vPtr;
+    vPtr.addr.pmemAddr = (PmemAddress)pk;
+    vPtr.isHot = false;
+    vPtr.timestamp = ts;
     indexer.insert({Key(schema02.schemaId, pk), vPtr});
   }
 
@@ -178,7 +178,7 @@ TEST(PBRBTest, Test02) {
       Key key(schema02.schemaId, pk);
       IndexerIterator idxIter = indexer.find(key);
       if (idxIter != indexer.end()) {
-        ValuePtr *vPtr = idxIter->second;
+        ValuePtr *vPtr = &idxIter->second;
         if (vPtr->isHot) {
           // Read PBRB
           TimeStamp tsRead;
@@ -192,18 +192,13 @@ TEST(PBRBTest, Test02) {
           // Read PLog get a value
           TimeStamp tsInsert;
           tsInsert.getNow();
-          bool status = pbrb.write(vPtr->timestamp, tsInsert, key.schemaId,
-                                   values[pk - 1], idxIter);
+          bool status = pbrb.syncwrite(vPtr->timestamp, tsInsert, key.schemaId,
+                                       values[pk - 1], idxIter);
           ASSERT_EQ(status, true);
           ASSERT_EQ(vPtr->isHot, true);
         }
       }
     }
-  }
-
-  // Release vPtrs
-  for (auto iter : indexer) {
-    if (iter.second != nullptr) delete iter.second;
   }
 }
 

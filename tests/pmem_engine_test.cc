@@ -1,6 +1,6 @@
 //
-//  tests/pmem_engine_test.cc
-//  PROJECT tests/pmem_engine_test
+//  pmem_engine_test.cc
+//  PROJECT pmem_engine_test
 //
 //  Created by zhenliu on 24/08/2022.
 //  Copyright (c) 2022 zhenliu <liuzhenm@mail.ustc.edu.cn>.

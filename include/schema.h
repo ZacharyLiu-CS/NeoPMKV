@@ -43,7 +43,7 @@ struct Key {
       return true;
     return false;
   }
-
+  // TODO: need add judgement of type: check whether pod type
   template <typename T>
   std::string &generatePK(T pkValue) {
     size_t size = sizeof(T);
@@ -61,7 +61,17 @@ struct ValuePtr {
     PmemAddress pmemAddr;
     RowAddr pbrbAddr;
   } addr;
-  bool isHot;
+  bool isHot = false;
+  void updatePmemAddr(PmemAddress pmAddr) {
+    this->isHot = false;
+    this->addr.pmemAddr = pmAddr;
+    this->timestamp.getNow();
+  }
+  void updateRowAddr(RowAddr rowAddr) {
+    this->isHot = true;
+    this->addr.pbrbAddr = rowAddr;
+    this->timestamp.getNow();
+  }
 };
 
 enum class FieldType : uint8_t {

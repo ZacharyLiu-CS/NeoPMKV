@@ -21,22 +21,22 @@
 int main(){
 
 
-  NKV::NeoPMKV * neopmkv = new NKV::NeoPMKV();
-  NKV::EntryKey key1 = 1;
-  std::string value1 = "1dsadadasdad1";
-  NKV::EntryKey key2 = 2;
-  std::string value2 = "22-09kjlksjdlajlsd";
-  neopmkv->put(key1, value1);
-  neopmkv->put(key2, value2);
+  // NKV::NeoPMKV * neopmkv = new NKV::NeoPMKV();
+  // NKV::Key key1 = 1;
+  // std::string value1 = "1dsadadasdad1";
+  // NKV::Key key2 = 2;
+  // std::string value2 = "22-09kjlksjdlajlsd";
+  // neopmkv->put(key1, value1);
+  // neopmkv->put(key2, value2);
 
-  std::string read_value = "";
-  read_value.clear();
-  neopmkv->get(key1, read_value);
-  LOG("value:" << read_value);
-  read_value.clear();
-  neopmkv->get(key2, read_value);
-  LOG("value:" << read_value);
+  // std::string read_value = "";
+  // read_value.clear();
+  // neopmkv->get(key1, read_value);
+  // LOG("value:" << read_value);
+  // read_value.clear();
+  // neopmkv->get(key2, read_value);
+  // LOG("value:" << read_value);
   
-  delete neopmkv;
+  // delete neopmkv;
   return 0;
 }

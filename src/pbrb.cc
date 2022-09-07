@@ -300,7 +300,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
   for (int i = 0; i < maxIdxSearchNum; i++) {
     if (prevIter != _indexer->begin()) {
       prevIter--;
-      auto valuePtr = prevIter->second;
+      auto valuePtr = &prevIter->second;
       if (valuePtr->isHot) {
         RowAddr rowAddr = valuePtr->addr.pbrbAddr;
         auto retVal = findPageAndRowByAddr(rowAddr);
@@ -316,7 +316,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
   for (int i = 0; i < maxIdxSearchNum && nextIter != _indexer->end(); i++) {
     nextIter++;
     if (nextIter == _indexer->end()) break;
-    auto valuePtr = nextIter->second;
+    auto valuePtr = &nextIter->second;
     if (valuePtr->isHot) {
       RowAddr rowAddr = valuePtr->addr.pbrbAddr;
       auto retVal = findPageAndRowByAddr(rowAddr);
@@ -427,9 +427,9 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
   }
 }
 
-bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
+bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
                  const Value &value, IndexerIterator iter) {
-  auto valuePtr = iter->second;
+  auto valuePtr = &iter->second;
 
   if (_bufferMap.find(schemaid) == _bufferMap.end()) {
     NKV_LOG_I(
@@ -485,5 +485,8 @@ bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
       oldTS, value, value.size());
   return true;
 }
-
+bool PBRB::dropRow(RowAddr rAddr) {
+  auto [pagePtr, rowOffset] = findPageAndRowByAddr(rAddr);
+  return pagePtr->clearRowBitMapPage(rowOffset);
+}
 }  // namespace NKV

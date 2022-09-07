@@ -39,7 +39,7 @@ const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = std::map<Key, ValuePtr *>;
+using IndexerT = std::map<Key, ValuePtr>;
 using IndexerIterator = IndexerT::iterator;
 
 class PBRB {
@@ -198,8 +198,11 @@ class PBRB {
  public:
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
             SchemaId schemaid, Value &value, ValuePtr *vPtr);
-  bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
+  bool syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
              const Value &value, IndexerIterator iter);
+  bool asyncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
+             const Value &value, IndexerIterator iter);
+  bool dropRow(RowAddr rAddr);
 
   // GTEST
   FRIEND_TEST(PBRBTest, Test01);

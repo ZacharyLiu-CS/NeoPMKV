@@ -406,17 +406,23 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 // Extern interfaces:
 
 bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
-                SchemaId schemaid, Value &value) {
+                SchemaId schemaid, Value &value, ValuePtr *vPtr) {
   BufferPage *pagePtr = getPageAddr(addr);
   BufferListBySchema &blbs = _bufferMap[schemaid];
-  value = pagePtr->getValueRow(addr, blbs.rowSize);
+  value = pagePtr->getValueRow(addr, blbs.valueSize);
   // Validation:
   if (pagePtr->getTimestampRow(addr).gt(oldTS)) {
     // Expired: Somebody updated the row.
     // TODO: Handle this case
+    NKV_LOG_E(std::cerr, "Expired Timestamp, Aborted.");
     return false;
   } else {
     pagePtr->setTimestampRow(addr, newTS);
+    vPtr->timestamp = newTS;
+    NKV_LOG_D(
+        std::cout,
+        "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
+        oldTS, value, value.size());
     return true;
   }
 }
@@ -473,8 +479,10 @@ bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
 
   // 5. Update ValuePtr
   _updateValuePtr(newTS, valuePtr, rowAddr, true);
-  NKV_LOG_D(std::cout, "PBRB: Successfully write row [ts:{} value: {}]", oldTS,
-            value);
+  NKV_LOG_D(
+      std::cout,
+      "PBRB: Successfully write row [ts: {}, value: {}, value.size(): {}]",
+      oldTS, value, value.size());
   return true;
 }
 

@@ -29,6 +29,13 @@ const uint32_t ERRMASK = 1 << 31;
 struct Key {
   uint32_t schemaId;
   std::string primaryKey;
+
+  template <typename T>
+  Key(uint32_t schemaId, T pkValue) {
+    this->schemaId = schemaId;
+    generatePK(pkValue);
+  }
+
   bool operator<(const Key k) const {
     if (this->schemaId < k.schemaId)
       return true;

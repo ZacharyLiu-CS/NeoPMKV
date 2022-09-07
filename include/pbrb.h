@@ -197,7 +197,7 @@ class PBRB {
 
  public:
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
-            SchemaId schemaid, Value &value);
+            SchemaId schemaid, Value &value, ValuePtr *vPtr);
   bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
              const Value &value, IndexerIterator iter);
 

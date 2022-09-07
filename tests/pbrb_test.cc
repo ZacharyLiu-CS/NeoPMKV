@@ -1,6 +1,7 @@
 #include <iostream>
 
 #include <cstdlib>
+#include <random>
 #include "gtest/gtest.h"
 #include "pbrb.h"
 #include "pmem_engine.h"
@@ -27,10 +28,9 @@ TEST(PBRBTest, Test01) {
   schema1Value v1{1, 2};
 
   auto sid1 = schema1.schemaId;
-  Key k1 = {.schemaId = sid1};
+  Key k1(sid1, v1.field1);
   std::string pk1_expected("\001\0", 2);
-  auto pk1 = k1.generatePK(v1.field1);
-  ASSERT_EQ(pk1, pk1_expected);
+  ASSERT_EQ(k1.primaryKey, pk1_expected);
 
   ValuePtr *vp1 = new ValuePtr;
   vp1->timestamp = timestamp;
@@ -55,7 +55,7 @@ TEST(PBRBTest, Test01) {
         ts_step2.getNow();
         Value read_result;
         bool status = pbrb.read(vPtr->timestamp, ts_step2, vPtr->addr.pbrbAddr,
-                                k1.schemaId, read_result);
+                                k1.schemaId, read_result, vPtr);
         ASSERT_EQ(status, true);
         schema1Value rv1;
         memcpy(&rv1, read_result.data(), sizeof(rv1));
@@ -107,6 +107,219 @@ TEST(SchemaTest, FieldTest) {
   ASSERT_EQ(schema.size, 8 + 8 + 8 + 128 + 128 + 1024 + 1048576);
 }
 
+TEST(PBRBTest, Test02) {
+  // Create Schema
+  SchemaAllocator schemaAllocator;
+  SchemaUMap sUMap;
+  std::vector<SchemaField> s02Fields{SchemaField(FieldType::INT64T, "pk"),
+                                     SchemaField(FieldType::STRING, "f1", 8),
+                                     SchemaField(FieldType::STRING, "f2", 16)};
+  Schema schema02 = schemaAllocator.createSchema("schema02", 0, s02Fields);
+  sUMap.addSchema(schema02);
+
+  // Generate KVs
+  std::vector<Value> values;
+  uint32_t length = 300;
+
+  for (uint64_t i = 1; i <= length; i++) {
+    char buf[32];
+    std::string pk((char *)&i, sizeof(i));
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "f1.%04lu", i);
+    std::string f1(buf, 8);
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "f2.%08lu", i);
+    std::string f2(buf, 16);
+
+    Value v;
+    v.append(pk).append(f1).append(f2);
+    ASSERT_EQ(v.size(), 32);
+    values.push_back(v);
+  }
+
+  for (auto v : values) {
+    uint64_t pk = *(uint64_t *)(v.substr(0, 8).data());
+    Value f1 = v.substr(8, 8);
+    Value f2 = v.substr(16, 16);
+    NKV_LOG_D(std::cout, "pk: {}, f1: {}, f2: {}", pk, f1, f2);
+  }
+
+  // Generate access pattern
+  enum class AccType : uint8_t { GET, PUT };
+
+  struct Access {
+    AccType accType;
+    Key key;
+    Value value;
+  };
+
+  // Create Indexer
+  IndexerT indexer;
+  for (auto v : values) {
+    uint64_t pk = *(uint64_t *)(v.substr(0, 8).data());
+    TimeStamp ts;
+    ts.getNow();
+    ValuePtr *vPtr = new ValuePtr;
+    vPtr->addr.pmemAddr = (PmemAddress)pk;
+    vPtr->isHot = false;
+    vPtr->timestamp = ts;
+    indexer.insert({Key(schema02.schemaId, pk), vPtr});
+  }
+
+  // Create PBRB
+  TimeStamp ts_start_pbrb;
+  ts_start_pbrb.getNow();
+  uint32_t maxPageNum = 256;
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexer, &sUMap);
+
+  // Cache all KVs
+  for (int i = 0; i < 3; i++) {
+    for (uint64_t pk = 1; pk <= length; pk++) {
+      Key key(schema02.schemaId, pk);
+      IndexerIterator idxIter = indexer.find(key);
+      if (idxIter != indexer.end()) {
+        ValuePtr *vPtr = idxIter->second;
+        if (vPtr->isHot) {
+          // Read PBRB
+          TimeStamp tsRead;
+          tsRead.getNow();
+          Value read_result;
+          bool status = pbrb.read(vPtr->timestamp, tsRead, vPtr->addr.pbrbAddr,
+                                  key.schemaId, read_result, vPtr);
+          ASSERT_EQ(status, true);
+          ASSERT_EQ(read_result, values[pk - 1]);
+        } else {
+          // Read PLog get a value
+          TimeStamp tsInsert;
+          tsInsert.getNow();
+          bool status = pbrb.write(vPtr->timestamp, tsInsert, key.schemaId,
+                                   values[pk - 1], idxIter);
+          ASSERT_EQ(status, true);
+          ASSERT_EQ(vPtr->isHot, true);
+        }
+      }
+    }
+  }
+
+  // Release vPtrs
+  for (auto iter : indexer) {
+    if (iter.second != nullptr) delete iter.second;
+  }
+}
+
+/*
+TEST(PBRBTest, Test03) {
+  // Create Schema
+  SchemaAllocator schemaAllocator;
+  SchemaUMap sUMap;
+  std::vector<SchemaField> s02Fields{SchemaField(FieldType::INT64T, "pk"),
+                                     SchemaField(FieldType::STRING, "f1", 8),
+                                     SchemaField(FieldType::STRING, "f2", 16)};
+  Schema schema03 = schemaAllocator.createSchema("schema02", 0, s02Fields);
+  sUMap.addSchema(schema03);
+
+  // Generate KVs
+  std::vector<Value> values;
+  uint32_t kvNumber = 300;
+
+  for (uint64_t i = 1; i <= kvNumber; i++) {
+    char buf[32];
+    std::string pk((char *)&i, sizeof(i));
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "f1.%04lu", i);
+    std::string f1(buf, 8);
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "f2.%08lu", i);
+    std::string f2(buf, 16);
+
+    Value v;
+    v.append(pk).append(f1).append(f2);
+    ASSERT_EQ(v.size(), 32);
+    values.push_back(v);
+  }
+
+  for (auto v : values) {
+    uint64_t pk = *(uint64_t *)(v.substr(0, 8).data());
+    Value f1 = v.substr(8, 8);
+    Value f2 = v.substr(16, 16);
+    NKV_LOG_I(std::cout, "pk: {}, f1: {}, f2: {}", pk, f1, f2);
+  }
+
+  // Create Indexer
+  IndexerT indexer;
+  for (auto v : values) {
+    uint64_t pk = *(uint64_t *)(v.substr(0, 8).data());
+    TimeStamp ts;
+    ts.getNow();
+    ValuePtr *vPtr = new ValuePtr;
+    vPtr->addr.pmemAddr = (PmemAddress)pk;
+    vPtr->isHot = false;
+    vPtr->timestamp = ts;
+    indexer.insert({Key(schema03.schemaId, pk), vPtr});
+  }
+
+  // Generate access pattern
+  enum class AccType : uint8_t { GET, PUT };
+
+  struct Access {
+    AccType accType;
+    Key key;
+    Value value;
+  };
+
+  std::vector<Access> accessVec;
+  uint32_t accessCount = 1000;
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> distrib(1, kvNumber);
+
+  for (int i = 0; i < accessCount; i++) {
+    uint64_t k = distrib(gen);
+    accessVec.push_back(Access{.accType = AccType::GET,
+                               .key = Key(schema03.schemaId, k)});
+  }
+  // Create PBRB
+  TimeStamp ts_start_pbrb;
+  ts_start_pbrb.getNow();
+  uint32_t maxPageNum = 256;
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexer, &sUMap);
+
+  // Cache all KVs
+  for (int i = 0; i < 3; i++) {
+    for (uint64_t pk = 1; pk <= kvNumber; pk++) {
+      Key key(schema03.schemaId, pk);
+      IndexerIterator idxIter = indexer.find(key);
+      if (idxIter != indexer.end()) {
+        ValuePtr *vPtr = idxIter->second;
+        if (vPtr->isHot) {
+          // Read PBRB
+          TimeStamp tsRead;
+          tsRead.getNow();
+          Value read_result;
+          bool status = pbrb.read(vPtr->timestamp, tsRead, vPtr->addr.pbrbAddr,
+                                  key.schemaId, read_result, vPtr);
+          ASSERT_EQ(status, true);
+          ASSERT_EQ(read_result, values[pk - 1]);
+        } else {
+          // Read PLog get a value
+          TimeStamp tsInsert;
+          tsInsert.getNow();
+          bool status = pbrb.write(vPtr->timestamp, tsInsert, key.schemaId,
+                                   values[pk - 1], idxIter);
+          ASSERT_EQ(status, true);
+          ASSERT_EQ(vPtr->isHot, true);
+        }
+      }
+    }
+  }
+
+  // Release vPtrs
+  for (auto iter : indexer) {
+    if (iter.second != nullptr) delete iter.second;
+  }
+}
+*/
 }  // namespace NKV
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);

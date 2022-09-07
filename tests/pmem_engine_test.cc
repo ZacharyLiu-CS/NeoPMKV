@@ -134,22 +134,22 @@ TEST(MultiThreadTest, ConcurrentAccessPmemLog) {
   strcpy(plogConfig.engine_path, testBaseDir.c_str());
   auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
   ASSERT_TRUE(status.is2xxOK());
-  int value_length = 60;
+  int value_length = 64 - 4;
   int num_threads = 16;
-  int num_ops = 1ull << 13;
+  int total_ops = 1ull << 10;
   auto writeToPmemLog = [=](int num_ops) {
     std::string value;
     for (auto i = 0; i < num_ops; i++) {
       value.resize(value_length);
       NKV::PmemAddress addr = 0;
       engine_ptr->append(addr, value.c_str(), value_length);
-      ASSERT_EQ(addr % 64, 0);
+      ASSERT_EQ(addr % (value_length+4), 0);
     }
   };
   std::vector<std::future<void>> future_pool;
   for (auto i = 0; i < num_threads; i++) {
     future_pool.push_back(
-        std::async(std::launch::async, writeToPmemLog, num_ops));
+        std::async(std::launch::async, writeToPmemLog, total_ops/num_threads));
   }
   for (auto &i : future_pool) {
     i.wait();

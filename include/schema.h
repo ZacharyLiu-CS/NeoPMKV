@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 #include "timestamp.h"
@@ -44,12 +45,15 @@ struct Key {
     return false;
   }
   // TODO: need add judgement of type: check whether pod type
-  template <typename T>
-  std::string &generatePK(T pkValue) {
-    size_t size = sizeof(T);
-    primaryKey.resize(size);
-    primaryKey.assign((const char *)(&pkValue), size);
-    return primaryKey;
+  template <typename T,
+            typename = typename std::enable_if<std::is_pod<T>::value>::type>
+  void generatePK(T pkValue) {
+    primaryKey.resize(sizeof(T));
+    *(T*)primaryKey.data() = pkValue;
+  }
+
+  void generatePK(std::string &pkValue) {
+    primaryKey = pkValue;
   }
 };
 

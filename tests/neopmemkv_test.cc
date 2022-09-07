@@ -9,6 +9,7 @@
 
 #include <cstdlib>
 #include <random>
+#include <string>
 #include "gtest/gtest.h"
 #include "logging.h"
 #include "neopmkv.h"
@@ -42,27 +43,20 @@ void PBRBTest(bool enablePBRB) {
   uint32_t length = 300;
 
   auto BuildValue = [](uint64_t i) -> Value {
-    char buf[32];
-    std::string pk((char *)&i, sizeof(i));
-    memset(buf, 0, sizeof(buf));
-    sprintf(buf, "f1.%04lu", i);
-    std::string f1(buf, 8);
-    memset(buf, 0, sizeof(buf));
-    sprintf(buf, "f2.%08lu", i);
-    std::string f2(buf, 16);
-
+    std::string num_str = std::to_string(i);
+    int zero_padding = 32 - num_str.size();
     Value v;
-    v.append(pk).append(f1).append(f2);
+    v.append(zero_padding,'0').append(num_str);
     return v;
   };
-  auto BuildKey = [sid](uint64_t i) -> Key { return Key(sid, i); };
+  auto BuildKey = [sid](uint64_t i) -> Key { return Key(sid, std::to_string(i)); };
 
-  for (uint64_t i = 1; i <= length; i++) {
+  for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
     auto value = BuildValue(i);
     neopmkv_->put(key, value);
   }
-  for (uint64_t i = 1; i <= length; i++) {
+  for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
     auto expect_value = BuildValue(i);
     Value read_value;
@@ -70,16 +64,16 @@ void PBRBTest(bool enablePBRB) {
     ASSERT_EQ(read_value, expect_value);
   }
   int remove_length = 100;
-  for (uint64_t i = 1; i <= remove_length; i++) {
+  for (uint64_t i = 0; i < remove_length; i++) {
     auto key = BuildKey(i);
     neopmkv_->remove(key);
   }
-  for (uint64_t i = 1; i <= length; i++) {
+  for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
     auto expect_value = BuildValue(i);
     Value read_value;
     bool res = neopmkv_->get(key, read_value);
-    if (i <= remove_length)
+    if (i < remove_length)
       ASSERT_EQ(false, res);
     else
       ASSERT_EQ(read_value, expect_value);
@@ -88,15 +82,23 @@ void PBRBTest(bool enablePBRB) {
   std::vector<Value> value_list;
   int scan_length = 100;
   neopmkv_->scan(start_key, value_list, scan_length);
-  for(uint64_t i = 1;i <= scan_length;i++){
+  for(uint64_t i = 0;i < value_list.size();i++){
     auto expect_value = BuildValue(i+remove_length);
-    NKV_LOG_D(std::cout,"expect value: {} read value: {}", expect_value, value_list[i]);
-    // ASSERT_EQ(expect_value, value_list[i]);
+    NKV_LOG_D(std::cout,"Key [{}] expect value: {} read value: {}",i+remove_length, expect_value, value_list[i]);
+    ASSERT_EQ(expect_value, value_list[i]);
   }
   delete neopmkv_;
 }
 TEST(NEOPMKVTEST, DisablePBRBTest) { PBRBTest(false); }
-
+TEST(NEOPMKVTEST, CleanTestFile){
+  bool status = false;
+  if (std::filesystem::exists(db_path)) {
+    status = std::filesystem::remove_all(db_path);
+  } else {
+    status = true;
+  }
+  ASSERT_TRUE(status == true);
+}
 TEST(NEOPMKVTEST, EnablePBRBTest) { PBRBTest(true); }
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);

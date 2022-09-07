@@ -29,6 +29,21 @@ const uint32_t ERRMASK = 1 << 31;
 struct Key {
   uint32_t schemaId;
   std::string primaryKey;
+  bool operator<(const Key k) const {
+    if (this->schemaId < k.schemaId)
+      return true;
+    else if (this->schemaId == k.schemaId && this->primaryKey < k.primaryKey)
+      return true;
+    return false;
+  }
+
+  template <typename T>
+  std::string &generatePK(T pkValue) {
+    size_t size = sizeof(T);
+    primaryKey.resize(size);
+    primaryKey.assign((const char *)(&pkValue), size);
+    return primaryKey;
+  }
 };
 
 using Value = std::string;
@@ -44,35 +59,49 @@ struct ValuePtr {
 
 enum class FieldType : uint8_t {
   NULL_T = 0,
-  STRING,  // NULL characters in string is OK
   INT16T,
   INT32T,
   INT64T,
   FLOAT,   // Not supported as key field for now
   DOUBLE,  // Not supported as key field for now
   BOOL,
-  FIELD_TYPE,  // The value refers to one of these types. Used in query filters.
-  NOT_KNOWN = 254,
-  NULL_LAST = 255
+  STRING,  // NULL characters in string is OK
 };
 
 const uint32_t FTSize[256] = {
     0,                // NULL_T = 0,
-    128,              // 128 STRING, // NULL characters in string is OK
     sizeof(int16_t),  // INT16T,
     sizeof(int32_t),  // INT32T,
     sizeof(int64_t),  // INT64T,
     sizeof(float),    // FLOAT, // Not supported as key field for now
     sizeof(double),   // DOUBLE,  // Not supported as key field for now
     sizeof(bool),     // BOOL,
-    1  // FIELD_TYPE, // The value refers to one of these types. Used in query
-       // filters. NOT_KNOWN = 254, NULL_LAST = 255
+    64,
 };
 
 struct SchemaField {
   FieldType type;
   std::string name;
-  uint32_t getSize() { return FTSize[(uint8_t)type]; }
+  uint32_t size = 0;
+
+  SchemaField() = delete;
+  SchemaField(FieldType type, std::string name, uint32_t size) {
+    this->type = type;
+    this->name = name;
+    if (type == FieldType::STRING) {
+      uint32_t maxSize = 1 << 20;
+      if (size > maxSize)
+        this->size = maxSize;
+      else
+        this->size = 1U << (32 - __builtin_clz(size - 1));
+    } else
+      size = FTSize[(uint8_t)type];
+  }
+  SchemaField(FieldType type, std::string name) {
+    this->type = type;
+    this->name = name;
+    this->size = FTSize[(uint8_t)type];
+  }
 };
 
 struct FieldMetaData {
@@ -104,7 +133,7 @@ struct Schema {
     }
     // Initializa the size
     for (auto i : fields) {
-      size += FTSize[(uint8_t)i.type];
+      size += i.size;
     }
     return size;
   }
@@ -147,29 +176,34 @@ class SchemaUMap {
 
 }  // namespace NKV
 
-template <> struct fmt::formatter<NKV::Key> {
-  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+template <>
+struct fmt::formatter<NKV::Key> {
+  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
     return ctx.begin();
   }
 
   // Formats the point p using the parsed format specification (presentation)
   // stored in this formatter.
   template <typename FormatContext>
-  auto format(const NKV::Key& key, FormatContext& ctx) const -> decltype(ctx.out()) {
+  auto format(const NKV::Key &key, FormatContext &ctx) const
+      -> decltype(ctx.out()) {
     // ctx.out() is an output iterator to write to.
-    return  fmt::format_to(ctx.out(), "schemaid:{},pkey:{}",key.schemaId, key.primaryKey);
+    return fmt::format_to(ctx.out(), "schemaid:{},pkey:{}", key.schemaId,
+                          key.primaryKey);
   }
 };
-template <> struct fmt::formatter<NKV::Value> {
-  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+template <>
+struct fmt::formatter<NKV::Value> {
+  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
     return ctx.begin();
   }
 
   // Formats the point p using the parsed format specification (presentation)
   // stored in this formatter.
   template <typename FormatContext>
-  auto format(const NKV::Value& value, FormatContext& ctx) const -> decltype(ctx.out()) {
+  auto format(const NKV::Value &value, FormatContext &ctx) const
+      -> decltype(ctx.out()) {
     // ctx.out() is an output iterator to write to.
-    return  fmt::format_to(ctx.out(), "{}", value);
+    return fmt::format_to(ctx.out(), "{}", value);
   }
 };

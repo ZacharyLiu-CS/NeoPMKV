@@ -29,7 +29,7 @@ class BufferListBySchema {
   uint32_t curPageNum = 0;
   uint32_t curRowNum = 0;
 
-  PBRB *bePBRBPtr = nullptr;
+  SchemaUMap *sUMap = nullptr;
   // manage the buffer list
   BufferPage *headPage = nullptr;
   BufferPage *tailPage = nullptr;
@@ -41,8 +41,8 @@ class BufferListBySchema {
 
   BufferListBySchema(SchemaId schemaId, uint32_t pageSize,
                      uint32_t pageHeaderSize, uint32_t rowHeaderSize,
-                     PBRB *pbrbPtr, BufferPage *headPagePtr) {
-    bePBRBPtr = pbrbPtr;
+                     SchemaUMap *sUMapPtr, BufferPage *headPagePtr) {
+    sUMap = sUMapPtr;
     headPage = headPagePtr;
     tailPage = headPagePtr;
     setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);

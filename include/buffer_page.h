@@ -164,7 +164,7 @@ class BufferPage {
       return false;
     }
     char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
-    memcpy(valueAddr, value.c_str(), value.size());
+    memcpy(valueAddr, value.data(), value.size());
     return true;
   }
 

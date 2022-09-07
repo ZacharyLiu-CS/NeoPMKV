@@ -69,18 +69,18 @@ class PmemLog : public PmemEngine {
       _mutex.unlock();
     }
 
-    char *pmem_addr = _chunk_list[_active_chunk_id.load()].pmem_addr +
-                      now_tail_offset % _plog_meta.chunk_size;
+    char *pmem_addr =
+        _chunk_list[now_tail_offset / _plog_meta.chunk_size].pmem_addr +
+        now_tail_offset % _plog_meta.chunk_size;
     NKV_LOG_D(std::cout,
               "Write data: len=>{} to offset=>{}, activate chunk id=>{}", len,
               now_tail_offset, _active_chunk_id.load());
 
     *(uint32_t *)pmem_addr = len;
-    pmem_addr += head_size;
     if (_is_pmem) {
-      _copyToPmem(pmem_addr, srcdata, len);
+      _copyToPmem(pmem_addr + head_size, srcdata, len);
     } else {
-      _copyToNonPmem(pmem_addr, srcdata, len);
+      _copyToNonPmem(pmem_addr + head_size, srcdata, len);
     }
     // atomic modify the tail_offset variable
     return now_tail_offset;

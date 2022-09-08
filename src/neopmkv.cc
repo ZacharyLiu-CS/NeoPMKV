@@ -22,24 +22,24 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   }
   ValuePtr &vPtr = idxIter->second;
 
-  if (vPtr.isHot) {
+  if (vPtr.isHot()) {
     NKV_LOG_D(std::cout, "Read value from PBRB");
     // Read PBRB
     TimeStamp tsRead;
     tsRead.getNow();
-    bool status = _pbrb->read(vPtr.timestamp, tsRead, vPtr.addr.pbrbAddr,
+    bool status = _pbrb->read(vPtr.getTimestamp(), tsRead, vPtr.getPBRBAddr(),
                               idxIter->first.schemaId, value, &vPtr);
   } else {
     NKV_LOG_D(std::cout, "Read value from PLOG");
     // Read PLog get a value
-    _engine_ptr->read(vPtr.addr.pmemAddr, value);
+    _engine_ptr->read(vPtr.getPmemAddr(), value);
     if (_enable_pbrb == false) {
       return true;
     }
     TimeStamp tsInsert;
     tsInsert.getNow();
     if (_async_pbrb == false) {
-      bool status = _pbrb->syncwrite(vPtr.timestamp, tsInsert,
+      bool status = _pbrb->syncwrite(vPtr.getTimestamp(), tsInsert,
                                      idxIter->first.schemaId, value, idxIter);
     }
   }
@@ -58,8 +58,8 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
   // try to insert
   auto [iter, status] = _indexer.insert({key, vPtr});
   if (status == true) return true;
-  if (_enable_pbrb == true && iter->second.isHot == true) {
-    _pbrb->dropRow(iter->second.addr.pbrbAddr);
+  if (_enable_pbrb == true && iter->second.isHot() == true) {
+    _pbrb->dropRow(iter->second.getPBRBAddr());
   }
   iter->second.updatePmemAddr(pmAddr);
   return true;
@@ -70,9 +70,9 @@ bool NeoPMKV::remove(Key &key) {
   if (idxIter == _indexer.end()) {
     return false;
   }
-  bool isHot = idxIter->second.isHot;
+  bool isHot = idxIter->second.isHot();
   if (isHot) {
-    _pbrb->dropRow(idxIter->second.addr.pbrbAddr);
+    _pbrb->dropRow(idxIter->second.getPBRBAddr());
   }
   _indexer.erase(idxIter);
   return true;

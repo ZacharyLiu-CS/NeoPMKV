@@ -33,9 +33,7 @@ TEST(PBRBTest, Test01) {
   ASSERT_EQ(k1.primaryKey, pk1_expected);
 
   ValuePtr *vp1 = new ValuePtr;
-  vp1->timestamp = timestamp;
-  vp1->addr.pmemAddr = 0x12345678;
-  vp1->isHot = false;
+  vp1->updatePmemAddr((PmemAddress)0x12345678);
   indexer.insert({k1, *vp1});
 
   std::string info[2] = {"Read k1, Cache k1(Cold)", "Read k1 (hot)"};
@@ -47,15 +45,16 @@ TEST(PBRBTest, Test01) {
     ASSERT_NE(idxIter, indexer.end());
     if (idxIter != indexer.end()) {
       ValuePtr *vPtr = &idxIter->second;
-      if (step == 1) ASSERT_EQ(vPtr->isHot, false);
-      if (step == 2) ASSERT_EQ(vPtr->isHot, true);
-      if (vPtr->isHot) {
+      if (step == 1) ASSERT_EQ(vPtr->isHot(), false);
+      if (step == 2) ASSERT_EQ(vPtr->isHot(), true);
+      if (vPtr->isHot()) {
         // Read PBRB
         TimeStamp ts_step2;
         ts_step2.getNow();
         Value read_result;
-        bool status = pbrb.read(vPtr->timestamp, ts_step2, vPtr->addr.pbrbAddr,
-                                k1.schemaId, read_result, vPtr);
+        bool status =
+            pbrb.read(vPtr->getTimestamp(), ts_step2, vPtr->getPBRBAddr(),
+                      k1.schemaId, read_result, vPtr);
         ASSERT_EQ(status, true);
         schema1Value rv1;
         memcpy(&rv1, read_result.data(), sizeof(rv1));
@@ -71,10 +70,10 @@ TEST(PBRBTest, Test01) {
         Value pbrb_v1 = Value((const char *)(&v1), 4);
         TimeStamp ts_step1;
         ts_step1.getNow();
-        bool status = pbrb.syncwrite(vPtr->timestamp, ts_step1, k1.schemaId,
-                                     pbrb_v1, idxIter);
+        bool status = pbrb.syncwrite(vPtr->getTimestamp(), ts_step1,
+                                     k1.schemaId, pbrb_v1, idxIter);
         ASSERT_EQ(status, true);
-        ASSERT_EQ(vPtr->isHot, true);
+        ASSERT_EQ(vPtr->isHot(), true);
       }
     }
   }
@@ -160,9 +159,7 @@ TEST(PBRBTest, Test02) {
     TimeStamp ts;
     ts.getNow();
     ValuePtr vPtr;
-    vPtr.addr.pmemAddr = (PmemAddress)pk;
-    vPtr.isHot = false;
-    vPtr.timestamp = ts;
+    vPtr.updatePmemAddr((PmemAddress)pk);
     indexer.insert({Key(schema02.schemaId, pk), vPtr});
   }
 
@@ -179,12 +176,12 @@ TEST(PBRBTest, Test02) {
       IndexerIterator idxIter = indexer.find(key);
       if (idxIter != indexer.end()) {
         ValuePtr *vPtr = &idxIter->second;
-        if (vPtr->isHot) {
+        if (vPtr->isHot()) {
           // Read PBRB
           TimeStamp tsRead;
           tsRead.getNow();
           Value read_result;
-          bool status = pbrb.read(vPtr->timestamp, tsRead, vPtr->addr.pbrbAddr,
+          bool status = pbrb.read(vPtr->getTimestamp(), tsRead, vPtr->getPBRBAddr(),
                                   key.schemaId, read_result, vPtr);
           ASSERT_EQ(status, true);
           ASSERT_EQ(read_result, values[pk - 1]);
@@ -192,10 +189,10 @@ TEST(PBRBTest, Test02) {
           // Read PLog get a value
           TimeStamp tsInsert;
           tsInsert.getNow();
-          bool status = pbrb.syncwrite(vPtr->timestamp, tsInsert, key.schemaId,
+          bool status = pbrb.syncwrite(vPtr->getTimestamp(), tsInsert, key.schemaId,
                                        values[pk - 1], idxIter);
           ASSERT_EQ(status, true);
-          ASSERT_EQ(vPtr->isHot, true);
+          ASSERT_EQ(vPtr->isHot(), true);
         }
       }
     }

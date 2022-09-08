@@ -176,24 +176,7 @@ class PBRB {
   }
 
  private:
-  std::mutex vPtrUpdateLock_;
   std::mutex writeLock_;
-
-  bool _updateValuePtr(TimeStamp newTS, ValuePtr *vPtr, RowAddr rAddr,
-                       bool isHot) {
-    std::lock_guard<std::mutex> lockGuard(vPtrUpdateLock_);
-    if (vPtr->timestamp.ge(newTS)) {
-      NKV_LOG_E(std::cerr,
-                "Someone has updated valuePtr with: ts = {}. Our ts = {}, "
-                "might be expired",
-                vPtr->timestamp, newTS);
-      return false;
-    }
-    vPtr->addr.pbrbAddr = rAddr;
-    vPtr->timestamp = newTS;
-    vPtr->isHot = true;
-    return true;
-  }
 
  public:
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,

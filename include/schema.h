@@ -49,32 +49,76 @@ struct Key {
             typename = typename std::enable_if<std::is_pod<T>::value>::type>
   void generatePK(T pkValue) {
     primaryKey.resize(sizeof(T));
-    *(T*)primaryKey.data() = pkValue;
+    *(T *)primaryKey.data() = pkValue;
   }
 
-  void generatePK(std::string &pkValue) {
-    primaryKey = pkValue;
-  }
+  void generatePK(std::string &pkValue) { primaryKey = pkValue; }
 };
 
 using Value = std::string;
 
-struct ValuePtr {
-  TimeStamp timestamp;
+class ValuePtr {
+ public:
+  ValuePtr() {
+    updateLock_ = new std::mutex;
+  }
+
+  ~ValuePtr() {
+    delete updateLock_;
+  }
+
+  ValuePtr(const ValuePtr &valuePtr) {
+    updateLock_ = new std::mutex;
+    _timestamp = valuePtr._timestamp;
+    _addr = valuePtr._addr;
+    _isHot = valuePtr._isHot;
+  }
+
+ private:
+  std::mutex *updateLock_ = nullptr;
+  TimeStamp _timestamp;
   union Addr {
     PmemAddress pmemAddr;
     RowAddr pbrbAddr;
-  } addr;
-  bool isHot = false;
-  void updatePmemAddr(PmemAddress pmAddr) {
-    this->isHot = false;
-    this->addr.pmemAddr = pmAddr;
-    this->timestamp.getNow();
+  } _addr;
+  bool _isHot = false;
+
+ public:
+  TimeStamp getTimestamp() { return _timestamp; }
+
+  PmemAddress getPmemAddr() { return _addr.pmemAddr; }
+
+  RowAddr getPBRBAddr() { return _addr.pbrbAddr; }
+
+  bool isHot() { return _isHot; }
+
+  void updateTS() { this->_timestamp.getNow(); }
+  void updateTS(TimeStamp newTS) { this->_timestamp = newTS; }
+
+  void updatePmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
+    std::lock_guard<std::mutex> lock(*updateLock_);
+    this->_isHot = false;
+    this->_addr.pmemAddr = pmAddr;
+    this->_timestamp = newTS;
   }
-  void updateRowAddr(RowAddr rowAddr) {
-    this->isHot = true;
-    this->addr.pbrbAddr = rowAddr;
-    this->timestamp.getNow();
+  void updatePmemAddr(PmemAddress pmAddr) {
+    std::lock_guard<std::mutex> lock(*updateLock_);
+    this->_isHot = false;
+    this->_addr.pmemAddr = pmAddr;
+    this->_timestamp.getNow();
+  }
+
+  void updatePBRBAddr(RowAddr rowAddr, TimeStamp newTS) {
+    std::lock_guard<std::mutex> lock(*updateLock_);
+    this->_isHot = true;
+    this->_addr.pbrbAddr = rowAddr;
+    this->_timestamp = newTS;
+  }
+  void updatePBRBAddr(RowAddr rowAddr) {
+    std::lock_guard<std::mutex> lock(*updateLock_);
+    this->_isHot = true;
+    this->_addr.pbrbAddr = rowAddr;
+    this->_timestamp.getNow();
   }
 };
 

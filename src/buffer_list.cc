@@ -35,12 +35,14 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
 
   uint32_t currRowOffset = rowHeaderSize + nullableBitmapSize;
   valueSize = 0;
+  uint32_t fieldHeadSize = sizeof(uint32_t);
   // Set Metadata
   for (size_t i = 0; i < ownSchema->fields.size(); i++) {
     FieldMetaData fieldObj;
+    valueSize += (fieldObj.fieldSize + fieldHeadSize);
 
     fieldObj.fieldSize = ownSchema->fields[i].size;
-    valueSize += fieldObj.fieldSize;
+    currRowOffset += fieldHeadSize;
     fieldObj.fieldOffset = currRowOffset;
     fieldObj.isNullable = false;
     fieldObj.isVariable = false;

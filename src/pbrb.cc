@@ -301,8 +301,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
     if (prevIter != _indexer->begin()) {
       prevIter--;
       auto valuePtr = &prevIter->second;
-      if (valuePtr->isHot) {
-        RowAddr rowAddr = valuePtr->addr.pbrbAddr;
+      if (valuePtr->isHot()) {
+        RowAddr rowAddr = valuePtr->getPBRBAddr();
         auto retVal = findPageAndRowByAddr(rowAddr);
         prevPagePtr = retVal.first;
         prevOff = retVal.second;
@@ -317,8 +317,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
     nextIter++;
     if (nextIter == _indexer->end()) break;
     auto valuePtr = &nextIter->second;
-    if (valuePtr->isHot) {
-      RowAddr rowAddr = valuePtr->addr.pbrbAddr;
+    if (valuePtr->isHot()) {
+      RowAddr rowAddr = valuePtr->getPBRBAddr();
       auto retVal = findPageAndRowByAddr(rowAddr);
       nextPagePtr = retVal.first;
       nextOff = retVal.second;
@@ -418,7 +418,7 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
     return false;
   } else {
     pagePtr->setTimestampRow(addr, newTS);
-    vPtr->timestamp = newTS;
+    vPtr->updateTS(newTS);
     NKV_LOG_D(
         std::cout,
         "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
@@ -428,7 +428,7 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
 }
 
 bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
-                 const Value &value, IndexerIterator iter) {
+                     const Value &value, IndexerIterator iter) {
   auto valuePtr = &iter->second;
 
   if (_bufferMap.find(schemaid) == _bufferMap.end()) {
@@ -459,8 +459,8 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
   // copy header:
   {
     std::lock_guard<std::mutex> lockGuard(writeLock_);
-    pagePtr->setTimestampRow(rowAddr, oldTS);
-    pagePtr->setPlogAddrRow(rowAddr, valuePtr->addr.pmemAddr);
+    pagePtr->setTimestampRow(rowAddr, newTS);
+    pagePtr->setPlogAddrRow(rowAddr, valuePtr->getPmemAddr());
     pagePtr->setKVNodeAddrRow(rowAddr, valuePtr);
     // copy row content:
     pagePtr->setValueRow(rowAddr, value, blbs.valueSize);
@@ -469,7 +469,7 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
   }
 
   // 4. Check consistency
-  if (valuePtr->timestamp.ne(oldTS)) {
+  if (valuePtr->getTimestamp().ne(oldTS)) {
     // Rollback
     pagePtr->clearRowBitMapPage(rowOffset);
     blbs.curRowNum--;
@@ -478,7 +478,7 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
   }
 
   // 5. Update ValuePtr
-  _updateValuePtr(newTS, valuePtr, rowAddr, true);
+  valuePtr->updatePBRBAddr(rowAddr, newTS);
   NKV_LOG_D(
       std::cout,
       "PBRB: Successfully write row [ts: {}, value: {}, value.size(): {}]",

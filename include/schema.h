@@ -157,14 +157,15 @@ struct SchemaField {
   SchemaField(FieldType type, std::string name, uint32_t size) {
     this->type = type;
     this->name = name;
-    if (type == FieldType::STRING) {
-      uint32_t maxSize = 1 << 20;
-      if (size > maxSize)
-        this->size = maxSize;
-      else
-        this->size = 1U << (32 - __builtin_clz(size - 1));
-    } else
-      size = FTSize[(uint8_t)type];
+    this->size = size;
+    // if (type == FieldType::STRING) {
+    //   uint32_t maxSize = 1 << 20;
+    //   if (size > maxSize)
+    //     this->size = maxSize;
+    //   else
+    //     this->size = 1U << (32 - __builtin_clz(size - 1));
+    // } else
+    //   size = FTSize[(uint8_t)type];
   }
   SchemaField(FieldType type, std::string name) {
     this->type = type;

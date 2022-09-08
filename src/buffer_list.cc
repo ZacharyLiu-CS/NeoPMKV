@@ -39,9 +39,9 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
   // Set Metadata
   for (size_t i = 0; i < ownSchema->fields.size(); i++) {
     FieldMetaData fieldObj;
+    fieldObj.fieldSize = ownSchema->fields[i].size;
     valueSize += (fieldObj.fieldSize + fieldHeadSize);
 
-    fieldObj.fieldSize = ownSchema->fields[i].size;
     currRowOffset += fieldHeadSize;
     fieldObj.fieldOffset = currRowOffset;
     fieldObj.isNullable = false;

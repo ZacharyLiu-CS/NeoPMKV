@@ -52,7 +52,7 @@ void PBRBTest(bool enablePBRB) {
 
   auto BuildValue = [](uint64_t i) -> Value {
     std::string num_str = std::to_string(i);
-    int zero_padding = 32 - num_str.size();
+    int zero_padding = 44 - num_str.size();
     Value v;
     v.append(zero_padding, '0').append(num_str);
     return v;

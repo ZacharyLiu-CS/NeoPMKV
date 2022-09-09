@@ -58,7 +58,7 @@ void PBRBTest(bool enablePBRB) {
     return v;
   };
   auto BuildKey = [sid](uint64_t i) -> Key {
-    return Key(sid, std::to_string(i));
+    return Key(sid, i);
   };
 
   for (uint64_t i = 0; i < length; i++) {

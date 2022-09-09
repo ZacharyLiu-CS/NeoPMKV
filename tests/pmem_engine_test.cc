@@ -16,6 +16,15 @@
 std::string testBaseDir = "/mnt/pmem0/NKV-TEST";
 NKV::PmemEngine *engine_ptr = nullptr;
 
+void CleanTestFile() {
+  bool status = false;
+  if (std::filesystem::exists(testBaseDir)) {
+    status = std::filesystem::remove_all(testBaseDir);
+  } else {
+    status = true;
+  }
+  ASSERT_TRUE(status == true);
+}
 TEST(GenerateTest, CreatePLOG) {
   NKV::PmemEngineConfig plogConfig;
   plogConfig.chunk_size = 4ULL << 20;
@@ -117,17 +126,10 @@ TEST(ReadTest, ReadLargeData) {
   ASSERT_TRUE(result.is2xxOK());
   delete engine_ptr;
   free(old_value);
+  CleanTestFile();
 }
 
-TEST(EndTest, CleanTestFile) {
-  bool status = false;
-  if (std::filesystem::exists(testBaseDir)) {
-    status = std::filesystem::remove_all(testBaseDir);
-  } else {
-    status = true;
-  }
-  ASSERT_TRUE(status == true);
-}
+
 TEST(MultiThreadTest, ConcurrentAccessPmemLog) {
   NKV::PmemEngineConfig plogConfig;
   plogConfig.chunk_size = 1ull << 10;
@@ -155,6 +157,7 @@ TEST(MultiThreadTest, ConcurrentAccessPmemLog) {
     i.wait();
   }
   delete engine_ptr;
+  CleanTestFile();
 }
 
 int main(int argc, char **argv) {

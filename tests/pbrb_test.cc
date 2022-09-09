@@ -29,7 +29,7 @@ TEST(PBRBTest, Test01) {
 
   auto sid1 = schema1.schemaId;
   Key k1(sid1, v1.field1);
-  std::string pk1_expected("\001\0", 2);
+  uint64_t pk1_expected = v1.field1;
   ASSERT_EQ(k1.primaryKey, pk1_expected);
 
   ValuePtr *vp1 = new ValuePtr;

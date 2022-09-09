@@ -29,15 +29,19 @@ const uint32_t ERRMASK = 1 << 31;
 
 struct Key {
   uint32_t schemaId;
-  std::string primaryKey;
+  uint64_t primaryKey;
 
-  template <typename T>
-  Key(uint32_t schemaId, T pkValue) {
+  // template <typename T>
+  // Key(uint32_t schemaId, T pkValue) {
+  //   this->schemaId = schemaId;
+  //   generatePK(pkValue);
+  // }
+  Key(uint32_t schemaId, uint64_t pkValue){
     this->schemaId = schemaId;
-    generatePK(pkValue);
+    primaryKey = pkValue;
   }
 
-  bool operator<(const Key k) const {
+  bool operator<(const Key &k) const {
     if (this->schemaId < k.schemaId)
       return true;
     else if (this->schemaId == k.schemaId && this->primaryKey < k.primaryKey)
@@ -45,14 +49,14 @@ struct Key {
     return false;
   }
   // TODO: need add judgement of type: check whether pod type
-  template <typename T,
-            typename = typename std::enable_if<std::is_pod<T>::value>::type>
-  void generatePK(T pkValue) {
-    primaryKey.resize(sizeof(T));
-    *(T *)primaryKey.data() = pkValue;
-  }
+  // template <typename T,
+  //           typename = typename std::enable_if<std::is_pod<T>::value>::type>
+  // void generatePK(T pkValue) {
+  //   primaryKey.resize(sizeof(T));
+  //   *(T *)primaryKey.data() = pkValue;
+  // }
 
-  void generatePK(std::string &pkValue) { primaryKey = pkValue; }
+  // void generatePK(std::string &pkValue) { primaryKey = pkValue; }
 };
 
 using Value = std::string;
@@ -153,14 +157,15 @@ struct SchemaField {
   SchemaField(FieldType type, std::string name, uint32_t size) {
     this->type = type;
     this->name = name;
-    if (type == FieldType::STRING) {
-      uint32_t maxSize = 1 << 20;
-      if (size > maxSize)
-        this->size = maxSize;
-      else
-        this->size = 1U << (32 - __builtin_clz(size - 1));
-    } else
-      size = FTSize[(uint8_t)type];
+    this->size = size;
+    // if (type == FieldType::STRING) {
+    //   uint32_t maxSize = 1 << 20;
+    //   if (size > maxSize)
+    //     this->size = maxSize;
+    //   else
+    //     this->size = 1U << (32 - __builtin_clz(size - 1));
+    // } else
+    //   size = FTSize[(uint8_t)type];
   }
   SchemaField(FieldType type, std::string name) {
     this->type = type;

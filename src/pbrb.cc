@@ -57,9 +57,10 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   NKV_LOG_I(
       std::cout,
       "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList "
-      "size:{}, pageSize: {}, smd.rowSize: {}, _bufferMap[0].rowSize: {}",
+      "size:{}, pageSize: {}, blbs.rowSize: {}, _bufferMap[{}].rowSize: {}, "
+      "maxRowCnt: {}",
       schemaId, pagePtr == nullptr, _freePageList.size(), sizeof(BufferPage),
-      blbs.rowSize, _bufferMap[schemaId].rowSize);
+      blbs.rowSize, schemaId, _bufferMap[schemaId].rowSize, blbs.maxRowCnt);
 
   // Initialize Page.
   // memset(pagePtr, 0, sizeof(BufferPage));
@@ -232,12 +233,30 @@ inline RowOffset PBRB::findEmptySlotInPage(BufferListBySchema &blbs,
                                            BufferPage *pagePtr,
                                            RowOffset beginOffset,
                                            RowOffset endOffset) {
-  return pagePtr->getFirstZeroBit(blbs.maxRowCnt);
+  if (pagePtr->getHotRowsNumPage() >= blbs.maxRowCnt) {
+    // NKV_LOG_I(std::cout, "BufferPage Full, skipped.");
+    return UINT32_MAX;
+  }
+#ifdef ENABLE_BREAKDOWN
+  PointProfiler timer;
+  timer.start();
+#endif
+  uint32_t result = pagePtr->getFirstZeroBit(blbs.maxRowCnt);
+  
+#ifdef ENABLE_BREAKDOWN
+  timer.end();
+  findSlotNss.emplace_back(timer.duration() * 1000000000);
+#endif
+
+  return result;
 }
 
 // Find first empty slot in linked list start with pagePtr.
 std::pair<BufferPage *, RowOffset> PBRB::traverseFindEmptyRow(
     uint32_t schemaID, BufferPage *pagePtr, uint32_t maxPageSearchingNum) {
+  if (maxPageSearchingNum == UINT32_MAX)
+    maxPageSearchingNum = _maxPageSearchingNum;
+
   if (maxPageSearchingNum == 0) {
     NKV_LOG_E(std::cerr, "maxPageSearchingNum must > 0, adjusted to 1");
   }
@@ -276,6 +295,10 @@ std::pair<BufferPage *, RowOffset> PBRB::traverseFindEmptyRow(
 //
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
     uint32_t schemaID, IndexerIterator iter) {
+#ifdef ENABLE_BREAKDOWN
+  PointProfiler fcrpTimer;
+  fcrpTimer.start();
+#endif
   if (iter == _indexer->end()) {
     NKV_LOG_E(std::cerr, "iter == _indexer->end()");
     return std::make_pair(nullptr, 0);
@@ -288,10 +311,14 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
               schemaID);
     return std::make_pair(nullptr, 0);
   }
+#ifdef ENABLE_BREAKDOWN
+  PointProfiler idxTimer;
+  idxTimer.start();
+#endif
 
   auto &blbs = bmIter->second;
   // Search in neighboring keys
-  uint32_t maxIdxSearchNum = 5;
+  uint32_t maxIdxSearchNum = 3;
   IndexerIterator prevIter = iter;
   IndexerIterator nextIter = iter;
 
@@ -325,6 +352,10 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
     }
   }
 
+#ifdef ENABLE_BREAKDOWN
+  idxTimer.end();
+  searchingIdxNss.emplace_back(idxTimer.duration() * 1000000000);
+#endif
   std::pair<BufferPage *, RowOffset> result = std::make_pair(nullptr, 0);
   // Case 1: nullptr <- key -> nullptr
   if (prevPagePtr == nullptr && nextPagePtr == nullptr) {
@@ -400,6 +431,12 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 
   NKV_LOG_D(std::cout, "Return a slot: pagePtr: {}, offset: {}",
             (void *)result.first, result.second);
+
+#ifdef ENABLE_BREAKDOWN
+  fcrpTimer.end();
+  fcrpNss.emplace_back(fcrpTimer.duration() * 1000000000);
+#endif
+
   return result;
 }
 

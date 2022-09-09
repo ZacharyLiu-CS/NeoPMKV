@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <bitset>
 #include <cassert>
 #include <cstddef>
@@ -18,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <new>
+#include <numeric>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -46,9 +48,28 @@ class PBRB {
  public:
   // constructor
   PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer, SchemaUMap *umap,
-       uint32_t maxPageSearchNum = UINT32_MAX);
+       uint32_t maxPageSearchNum = 5);
   // dtor
   ~PBRB();
+
+#ifdef ENABLE_BREAKDOWN
+  void analyzePerf() {
+    auto outputVector = [](std::vector<double> &vec, std::string &&name) {
+      double total = std::accumulate<std::vector<double>::iterator, double>(
+          vec.begin(), vec.end(), 0);
+      NKV_LOG_I(
+          std::cout,
+          "Number of {}: {}, total time cost: {} s, average time cost: {} ns",
+          name, vec.size(), total / 1000000000, total / vec.size());
+    };
+    outputVector(findSlotNss, std::string("findSlotNss"));
+    outputVector(fcrpNss, std::string("fcrpNss"));
+    outputVector(searchingIdxNss, std::string("searchingIdxNss"));
+  }
+  std::vector<double> findSlotNss;
+  std::vector<double> fcrpNss;
+  std::vector<double> searchingIdxNss;
+#endif
 
  private:
   uint32_t _maxPageNumber;
@@ -182,9 +203,9 @@ class PBRB {
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
             SchemaId schemaid, Value &value, ValuePtr *vPtr);
   bool syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
-             const Value &value, IndexerIterator iter);
+                 const Value &value, IndexerIterator iter);
   bool asyncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
-             const Value &value, IndexerIterator iter);
+                  const Value &value, IndexerIterator iter);
   bool dropRow(RowAddr rAddr);
 
   // GTEST

@@ -57,17 +57,15 @@ TEST(PBRBTest, Test01) {
                       k1.schemaId, read_result, vPtr);
         ASSERT_EQ(status, true);
         schema1Value rv1;
-        memcpy(&rv1, read_result.data(), sizeof(rv1));
         NKV_LOG_I(std::cout,
                   "Read K1 [schemaId: {}, primaryKey: {}], Value1 [field1: {}, "
                   "field2: {}]",
                   k1.schemaId, k1.primaryKey, (uint16_t)rv1.field1,
                   (uint16_t)rv1.field2);
-        ASSERT_EQ(rv1.field1, v1.field1);
-        ASSERT_EQ(rv1.field2, v1.field2);
+        ASSERT_EQ(read_result, Value(12, '1'));
       } else {
         // Read PLog get a value
-        Value pbrb_v1 = Value((const char *)(&v1), 4);
+        Value pbrb_v1 = Value(12, '1');
         TimeStamp ts_step1;
         ts_step1.getNow();
         bool status = pbrb.syncwrite(vPtr->getTimestamp(), ts_step1,
@@ -118,8 +116,13 @@ TEST(PBRBTest, Test02) {
 
   // Generate KVs
   std::vector<Value> values;
-  uint32_t length = 300;
+  uint32_t length = 1 << 20;
+  uint32_t maxPageNum = 1 << 15;
 
+  Value padding("0000", 4);
+  padding.resize(4);
+  PointProfiler generate_value;
+  generate_value.start();
   for (uint64_t i = 1; i <= length; i++) {
     char buf[32];
     std::string pk((char *)&i, sizeof(i));
@@ -131,17 +134,24 @@ TEST(PBRBTest, Test02) {
     std::string f2(buf, 16);
 
     Value v;
-    v.append(pk).append(f1).append(f2);
-    ASSERT_EQ(v.size(), 32);
-    values.push_back(v);
+    v.append(padding)
+        .append(pk)
+        .append(padding)
+        .append(f1)
+        .append(padding)
+        .append(f2);
+    ASSERT_EQ(v.size(), 44);
+    values.emplace_back(v);
   }
+  generate_value.end();
+  NKV_LOG_I(std::cout, "Genenation Duration: {}", generate_value.duration());
 
-  for (auto v : values) {
-    uint64_t pk = *(uint64_t *)(v.substr(0, 8).data());
-    Value f1 = v.substr(8, 8);
-    Value f2 = v.substr(16, 16);
-    NKV_LOG_D(std::cout, "pk: {}, f1: {}, f2: {}", pk, f1, f2);
-  }
+  // for (auto v : values) {
+  //   uint64_t pk = *(uint64_t *)(v.substr(4, 8).data());
+  //   Value f1 = v.substr(16, 8);
+  //   Value f2 = v.substr(28, 16);
+  //   NKV_LOG_D(std::cout, "pk: {}, f1: {}, f2: {}", pk, f1, f2);
+  // }
 
   // Generate access pattern
   enum class AccType : uint8_t { GET, PUT };
@@ -152,25 +162,31 @@ TEST(PBRBTest, Test02) {
     Value value;
   };
 
+  PointProfiler indexer_timer;
+  indexer_timer.start();
   // Create Indexer
   IndexerT indexer;
   for (auto v : values) {
-    uint64_t pk = *(uint64_t *)(v.substr(0, 8).data());
+    uint64_t pk = *(uint64_t *)(v.substr(4, 8).data());
     TimeStamp ts;
     ts.getNow();
     ValuePtr vPtr;
     vPtr.updatePmemAddr((PmemAddress)pk);
     indexer.insert({Key(schema02.schemaId, pk), vPtr});
   }
+  indexer_timer.end();
+  NKV_LOG_I(std::cout, "Indexer Insertion Duration: {}s",
+            indexer_timer.duration());
 
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
-  uint32_t maxPageNum = 256;
   PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexer, &sUMap);
 
   // Cache all KVs
   for (int i = 0; i < 3; i++) {
+    PointProfiler timer;
+    timer.start();
     for (uint64_t pk = 1; pk <= length; pk++) {
       Key key(schema02.schemaId, pk);
       IndexerIterator idxIter = indexer.find(key);
@@ -181,22 +197,28 @@ TEST(PBRBTest, Test02) {
           TimeStamp tsRead;
           tsRead.getNow();
           Value read_result;
-          bool status = pbrb.read(vPtr->getTimestamp(), tsRead, vPtr->getPBRBAddr(),
-                                  key.schemaId, read_result, vPtr);
+          bool status =
+              pbrb.read(vPtr->getTimestamp(), tsRead, vPtr->getPBRBAddr(),
+                        key.schemaId, read_result, vPtr);
           ASSERT_EQ(status, true);
           ASSERT_EQ(read_result, values[pk - 1]);
         } else {
           // Read PLog get a value
           TimeStamp tsInsert;
           tsInsert.getNow();
-          bool status = pbrb.syncwrite(vPtr->getTimestamp(), tsInsert, key.schemaId,
-                                       values[pk - 1], idxIter);
+          bool status = pbrb.syncwrite(vPtr->getTimestamp(), tsInsert,
+                                       key.schemaId, values[pk - 1], idxIter);
           ASSERT_EQ(status, true);
           ASSERT_EQ(vPtr->isHot(), true);
         }
       }
     }
+    timer.end();
+    NKV_LOG_I(std::cout, "Step {}: Duration: {}s", i + 1, timer.duration());
   }
+#ifdef ENABLE_BREAKDOWN
+  pbrb.analyzePerf();
+#endif
 }
 
 /*

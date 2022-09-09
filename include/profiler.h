@@ -87,7 +87,7 @@ class PointProfiler {
   inline double end() {
     uint64_t end_tick = rte_rdtsc();
     return duration_ = static_cast<double>(end_tick - start_tick_) /
-           static_cast<double>(TSC_KHz) / 1000000ull;
+           static_cast<double>(TSC_KHz) / 1000ull;
   }
 
   inline double duration(){

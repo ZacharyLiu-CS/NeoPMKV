@@ -16,6 +16,10 @@ else( CMAKE_BUILD_TYPE STREQUAL "Release" )
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -fopenmp")
 endif( CMAKE_BUILD_TYPE STREQUAL "Debug" )
 
+if(BREAKDOWN STREQUAL "ON")
+  add_compile_definitions(ENABLE_BREAKDOWN)
+endif(BREAKDOWN STREQUAL "ON")
+
 # find_package(PkgConfig REQUIRED)
 # pkg_check_modules(LIBPMEMKV REQUIRED libpmemkv)
 # pkg_check_modules(LIBPMEMOBJ REQUIRED libpmemobj)

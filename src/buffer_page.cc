@@ -125,9 +125,11 @@ RowOffset BufferPage::getFirstZeroBit(uint32_t maxRowNumOfPage,
                                       uint32_t endOffset) {
   if (maxRowNumOfPage == getHotRowsNumPage()) return UINT32_MAX;
   if (endOffset > maxRowNumOfPage) endOffset = maxRowNumOfPage;
-  if (beginOffset > endOffset)
+  if (beginOffset > endOffset) {
     NKV_LOG_E(std::cerr, "beginOffset: {} > endOffset: {}", beginOffset,
               endOffset);
+    return UINT32_MAX;
+  }
 
   // No __builtin implementation:
   uint32_t beginByte = beginOffset / 8;
@@ -151,7 +153,7 @@ RowOffset BufferPage::getFirstZeroBit(uint32_t maxRowNumOfPage,
         if (((byteContent >> bitIdx) & (uint8_t)1) == 0)
           return byteIdx * 8 + bitIdx;
   }
-  
+
   return UINT32_MAX;
 }
 

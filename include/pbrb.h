@@ -197,6 +197,42 @@ class PBRB {
   }
 
  private:
+  // Staticstics:
+  // Hit Ratio
+  struct AccessStatistics {
+    uint64_t accessCount = 0;
+    uint64_t hitCount = 0;
+  };
+
+  std::unordered_map<SchemaId, AccessStatistics> _AccStatBySchema;
+
+ public:
+  bool schemaHit(SchemaId sid) {
+    auto &accStat = _AccStatBySchema[sid];
+    accStat.accessCount++;
+    accStat.hitCount++;
+    return true;
+  }
+  bool schemaMiss(SchemaId sid) {
+    auto &accStat = _AccStatBySchema[sid];
+    accStat.accessCount++;
+    return true;
+  }
+  double getHitRatio(SchemaId sid) {
+    auto it = _AccStatBySchema.find(sid);
+    if (it == _AccStatBySchema.end()) return -1;
+    return (double)(it->second.hitCount) / it->second.accessCount;
+  }
+
+  void outputHitRatios() {
+    for (auto &it : _AccStatBySchema) {
+      NKV_LOG_I(std::cout, "SchemaId: {}, Hit Ratio: {} / {} = {}", it.first,
+                it.second.hitCount, it.second.accessCount,
+                (double)it.second.hitCount / it.second.accessCount);
+    }
+  }
+
+ private:
   std::mutex writeLock_;
 
  public:

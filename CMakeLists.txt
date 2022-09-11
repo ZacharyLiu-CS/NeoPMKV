@@ -20,6 +20,10 @@ if(BREAKDOWN STREQUAL "ON")
   add_compile_definitions(ENABLE_BREAKDOWN)
 endif(BREAKDOWN STREQUAL "ON")
 
+if(STATISTICS STREQUAL "ON")
+  add_compile_definitions(ENABLE_STATISTICS)
+endif(STATISTICS STREQUAL "ON")
+
 # find_package(PkgConfig REQUIRED)
 # pkg_check_modules(LIBPMEMKV REQUIRED libpmemkv)
 # pkg_check_modules(LIBPMEMOBJ REQUIRED libpmemobj)

@@ -36,6 +36,7 @@ PBRB::~PBRB() {
   if (_bufferPoolPtr != nullptr) {
     delete _bufferPoolPtr;
   }
+  outputHitRatios();
 }
 
 BufferPage *PBRB::getPageAddr(void *rowAddr) {
@@ -70,6 +71,7 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   pagePtr->setSchemaVerPage(schemaVer);
 
   _freePageList.pop_front();
+  _AccStatBySchema.insert({schemaId, AccessStatistics()});
 
   return pagePtr;
 }

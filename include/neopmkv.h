@@ -51,6 +51,9 @@ class NeoPMKV {
     if (_enable_pbrb) {
       delete _pbrb;
     }
+#ifdef ENABLE_STATISTICS
+    outputReadStat();
+#endif
   }
 
   SchemaId createSchema(std::vector<SchemaField> fields, uint32_t primarykey_id,
@@ -82,6 +85,34 @@ class NeoPMKV {
 
   PmemEngineConfig _engine_config;
   PmemEngine *_engine_ptr = nullptr;
+
+#ifdef ENABLE_STATISTICS
+  // Statistics:
+  PointProfiler _timer;
+  struct StatStruct {
+    uint64_t pmemReadCount = 0;
+    double pmemReadTimeSecs = 0;
+    uint64_t pbrbReadCount = 0;
+    double pbrbReadTimeSecs = 0;
+  } _durationStat;
+
+ public:
+  void outputReadStat() {
+    NKV_LOG_I(
+        std::cout,
+        "PMem: Read Count: {}, Total Time Cost: {}s, Average Time Cost: {}ns",
+        _durationStat.pmemReadCount, _durationStat.pmemReadTimeSecs,
+        _durationStat.pmemReadTimeSecs / _durationStat.pmemReadCount *
+            1000000000);
+
+    NKV_LOG_I(
+        std::cout,
+        "PBRB: Read Count: {}, Total Time Cost: {}s, Average Time Cost: {}ns",
+        _durationStat.pbrbReadCount, _durationStat.pbrbReadTimeSecs,
+        _durationStat.pbrbReadTimeSecs / _durationStat.pbrbReadCount *
+            1000000000);
+  }
+#endif
 };
 
 }  // namespace NKV

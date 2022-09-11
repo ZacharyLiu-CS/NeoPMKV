@@ -57,9 +57,7 @@ void PBRBTest(bool enablePBRB) {
     v.append(zero_padding, '0').append(num_str);
     return v;
   };
-  auto BuildKey = [sid](uint64_t i) -> Key {
-    return Key(sid, i);
-  };
+  auto BuildKey = [sid](uint64_t i) -> Key { return Key(sid, i); };
 
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
@@ -108,6 +106,47 @@ TEST(NEOPMKVTEST, DisablePBRBTest) {
 TEST(NEOPMKVTEST, EnablePBRBTest) {
   PBRBTest(true);
   cleanFile(db_path);
+}
+
+TEST(NEOPMKVTEST, TimeStaticsTest) {
+  int res = system(clean_cmd.c_str());
+  res = system(mkdir_cmd.c_str());
+
+  NKV::NeoPMKV *neopmkv_ = nullptr;
+  if (neopmkv_ == nullptr) {
+    neopmkv_ = new NKV::NeoPMKV(db_path, chunk_size, db_size, true);
+  }
+  SchemaId sid = neopmkv_->createSchema(Fields, 0, "test1");
+
+  // Generate KVs
+  std::vector<Value> values;
+  uint32_t length = 1 << 20;
+
+  auto BuildValue = [](uint64_t i) -> Value {
+    std::string num_str = std::to_string(i);
+    int zero_padding = 44 - num_str.size();
+    Value v;
+    v.append(zero_padding, '0').append(num_str);
+    return v;
+  };
+  auto BuildKey = [sid](uint64_t i) -> Key { return Key(sid, i); };
+
+  for (uint64_t i = 0; i < length; i++) {
+    auto key = BuildKey(i);
+    auto value = BuildValue(i);
+    neopmkv_->put(key, value);
+  }
+  uint32_t maxReadRounds = 5;
+  for (uint32_t round = 0; round < maxReadRounds; round++) {
+    for (uint64_t i = 0; i < length; i++) {
+      auto key = BuildKey(i);
+      auto expect_value = BuildValue(i);
+      Value read_value;
+      neopmkv_->get(key, read_value);
+      ASSERT_EQ(read_value, expect_value);
+    }
+  }
+  delete neopmkv_;
 }
 
 int main(int argc, char **argv) {

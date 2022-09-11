@@ -24,20 +24,40 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
 
   if (vPtr.isHot()) {
     NKV_LOG_D(std::cout, "Read value from PBRB");
+    _pbrb->schemaHit(idxIter->first.schemaId);
     // Read PBRB
     TimeStamp tsRead;
     tsRead.getNow();
+#ifdef ENABLE_STATISTICS
+    _timer.start();
+#endif
     bool status = _pbrb->read(vPtr.getTimestamp(), tsRead, vPtr.getPBRBAddr(),
                               idxIter->first.schemaId, value, &vPtr);
+#ifdef ENABLE_STATISTICS
+    _timer.end();
+    _durationStat.pbrbReadCount++;
+    _durationStat.pbrbReadTimeSecs += _timer.duration();
+#endif
+
   } else {
     NKV_LOG_D(std::cout, "Read value from PLOG");
     // Read PLog get a value
+
+#ifdef ENABLE_STATISTICS
+    _timer.start();
+#endif
     _engine_ptr->read(vPtr.getPmemAddr(), value);
+#ifdef ENABLE_STATISTICS
+    _timer.end();
+    _durationStat.pmemReadCount++;
+    _durationStat.pmemReadTimeSecs += _timer.duration();
+#endif
     if (_enable_pbrb == false) {
       return true;
     }
     TimeStamp tsInsert;
     tsInsert.getNow();
+    _pbrb->schemaMiss(idxIter->first.schemaId);
     if (_async_pbrb == false) {
       bool status = _pbrb->syncwrite(vPtr.getTimestamp(), tsInsert,
                                      idxIter->first.schemaId, value, idxIter);

@@ -55,6 +55,12 @@ target_link_libraries( ${PROJECT_NAME}
   fmt::fmt
   )
 
+set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/neopmkv)
+MESSAGE("Install prefix is: ${CMAKE_INSTALL_PREFIX}")
+file(GLOB HEADERS ${PROJECT_SOURCE_DIR}/include/*.h)
+install(TARGETS ${PROJECT_NAME} DESTINATION lib)
+install(FILES ${HEADERS} DESTINATION include)
+  
 #9. define gtest path
 set(GTEST_LIBRARY ${PROJECT_SOURCE_DIR}/third_party/googletest/build/lib)
 set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)

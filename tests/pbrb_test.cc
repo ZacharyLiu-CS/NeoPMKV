@@ -1,6 +1,7 @@
 #include <iostream>
 
 #include <cstdlib>
+#include <memory>
 #include <random>
 #include "gtest/gtest.h"
 #include "pbrb.h"
@@ -17,9 +18,11 @@ TEST(PBRBTest, Test01) {
 
   TimeStamp timestamp;
   timestamp.getNow();
-  IndexerT indexer;
+  IndexerList indexerList;
+  indexerList.insert({1,std::make_shared<IndexerT>()});
+  auto indexer = indexerList[1];
   uint32_t maxPageNum = 100;
-  PBRB pbrb(maxPageNum, &timestamp, &indexer, &sUMap);
+  PBRB pbrb(maxPageNum, &timestamp, &indexerList, &sUMap);
 
   struct schema1Value {
     uint16_t field1;
@@ -34,16 +37,16 @@ TEST(PBRBTest, Test01) {
 
   ValuePtr *vp1 = new ValuePtr;
   vp1->updatePmemAddr((PmemAddress)0x12345678);
-  indexer.insert({k1, *vp1});
+  indexer->insert({k1.primaryKey, *vp1});
 
   std::string info[2] = {"Read k1, Cache k1(Cold)", "Read k1 (hot)"};
   // Step 1: Read k1, Cache k1(Cold)
   // Step 2: Read k1 (hot)
   for (int step = 1; step <= 2; step++) {
     NKV_LOG_I(std::cout, "Step {}: {}", step, info[step - 1]);
-    IndexerIterator idxIter = indexer.find(k1);
-    ASSERT_NE(idxIter, indexer.end());
-    if (idxIter != indexer.end()) {
+    IndexerIterator idxIter = indexer->find(k1.primaryKey);
+    ASSERT_NE(idxIter, indexer->end());
+    if (idxIter != indexer->end()) {
       ValuePtr *vPtr = &idxIter->second;
       if (step == 1) ASSERT_EQ(vPtr->isHot(), false);
       if (step == 2) ASSERT_EQ(vPtr->isHot(), true);
@@ -165,14 +168,16 @@ TEST(PBRBTest, Test02) {
   PointProfiler indexer_timer;
   indexer_timer.start();
   // Create Indexer
-  IndexerT indexer;
+  IndexerList indexerList;
+  indexerList.insert({1,std::make_shared<IndexerT>()});
+  auto indexer = indexerList[1];
   for (auto v : values) {
     uint64_t pk = *(uint64_t *)(v.substr(4, 8).data());
     TimeStamp ts;
     ts.getNow();
     ValuePtr vPtr;
     vPtr.updatePmemAddr((PmemAddress)pk);
-    indexer.insert({Key(schema02.schemaId, pk), vPtr});
+    indexer->insert({pk, vPtr});
   }
   indexer_timer.end();
   NKV_LOG_I(std::cout, "Indexer Insertion Duration: {}s",
@@ -181,7 +186,7 @@ TEST(PBRBTest, Test02) {
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
-  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexer, &sUMap);
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap);
 
   // Cache all KVs
   for (int i = 0; i < 3; i++) {
@@ -189,8 +194,8 @@ TEST(PBRBTest, Test02) {
     timer.start();
     for (uint64_t pk = 1; pk <= length; pk++) {
       Key key(schema02.schemaId, pk);
-      IndexerIterator idxIter = indexer.find(key);
-      if (idxIter != indexer.end()) {
+      IndexerIterator idxIter = indexer->find(key.primaryKey);
+      if (idxIter != indexer->end()) {
         ValuePtr *vPtr = &idxIter->second;
         if (vPtr->isHot()) {
           // Read PBRB

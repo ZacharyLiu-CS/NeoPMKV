@@ -16,15 +16,16 @@
 
 namespace NKV {
 bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
-                                        Value &value) {
-  if (idxIter == _indexer.end()) {
+                                        std::shared_ptr<IndexerT> indexer,
+                                        SchemaId schemaid, Value &value) {
+  if (idxIter == indexer->end()) {
     return false;
   }
   ValuePtr &vPtr = idxIter->second;
 
   if (vPtr.isHot()) {
     NKV_LOG_D(std::cout, "Read value from PBRB");
-    _pbrb->schemaHit(idxIter->first.schemaId);
+    _pbrb->schemaHit(schemaid);
     // Read PBRB
     TimeStamp tsRead;
     tsRead.getNow();
@@ -32,7 +33,7 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     _timer.start();
 #endif
     bool status = _pbrb->read(vPtr.getTimestamp(), tsRead, vPtr.getPBRBAddr(),
-                              idxIter->first.schemaId, value, &vPtr);
+                              schemaid, value, &vPtr);
 #ifdef ENABLE_STATISTICS
     _timer.end();
     _durationStat.pbrbReadCount++;
@@ -57,26 +58,35 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     }
     TimeStamp tsInsert;
     tsInsert.getNow();
-    _pbrb->schemaMiss(idxIter->first.schemaId);
+    _pbrb->schemaMiss(schemaid);
     if (_async_pbrb == false) {
-      bool status = _pbrb->syncwrite(vPtr.getTimestamp(), tsInsert,
-                                     idxIter->first.schemaId, value, idxIter);
+      bool status = _pbrb->syncwrite(vPtr.getTimestamp(), tsInsert, schemaid,
+                                     value, idxIter);
     }
   }
   return true;
 }
 bool NeoPMKV::get(Key &key, std::string &value) {
-  IndexerIterator idxIter = _indexer.find(key);
-  return getValueFromIndexIterator(idxIter, value);
+  if (checkSchemaIdValid(key.schemaId) == false) {
+    return false;
+  }
+  auto indexer = _indexerList[key.schemaId];
+  IndexerIterator idxIter = indexer->find(key.primaryKey);
+  return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value);
 }
 bool NeoPMKV::put(Key &key, const std::string &value) {
+  if (checkSchemaIdValid(key.schemaId) == false) {
+    return false;
+  }
+  auto indexer = _indexerList[key.schemaId];
+
   PmemAddress pmAddr;
   Status s = _engine_ptr->append(pmAddr, value.c_str(), value.size());
   if (!s.is2xxOK()) return false;
   ValuePtr vPtr;
   vPtr.updatePmemAddr(pmAddr);
   // try to insert
-  auto [iter, status] = _indexer.insert({key, vPtr});
+  auto [iter, status] = indexer->insert({key.primaryKey, vPtr});
   if (status == true) return true;
   if (_enable_pbrb == true && iter->second.isHot() == true) {
     _pbrb->dropRow(iter->second.getPBRBAddr());
@@ -86,23 +96,32 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
 }
 
 bool NeoPMKV::remove(Key &key) {
-  IndexerIterator idxIter = _indexer.find(key);
-  if (idxIter == _indexer.end()) {
+  if (checkSchemaIdValid(key.schemaId) == false) {
+    return false;
+  }
+  auto indexer = _indexerList[key.schemaId];
+
+  IndexerIterator idxIter = indexer->find(key.primaryKey);
+  if (idxIter == indexer->end()) {
     return false;
   }
   bool isHot = idxIter->second.isHot();
   if (isHot) {
     _pbrb->dropRow(idxIter->second.getPBRBAddr());
   }
-  _indexer.erase(idxIter);
+  indexer->erase(idxIter);
   return true;
 }
 bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
                    uint32_t scan_len) {
-  auto iter = _indexer.upper_bound(start);
-  for (auto i = 0; i < scan_len && iter != _indexer.end(); i++, iter++) {
+  if (checkSchemaIdValid(start.schemaId) == false) {
+    return false;
+  }
+  auto indexer = _indexerList[start.schemaId];
+  auto iter = indexer->upper_bound(start.primaryKey);
+  for (auto i = 0; i < scan_len && iter != indexer->end(); i++, iter++) {
     std::string tmp_value;
-    getValueFromIndexIterator(iter, tmp_value);
+    getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value);
     value_list.push_back(tmp_value);
   }
   return true;

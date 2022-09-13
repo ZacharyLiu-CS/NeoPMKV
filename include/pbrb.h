@@ -41,13 +41,14 @@ const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = std::map<Key, ValuePtr>;
+using IndexerT = std::map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
 using IndexerIterator = IndexerT::iterator;
 
 class PBRB {
  public:
   // constructor
-  PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer, SchemaUMap *umap,
+  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr, SchemaUMap *umap,
        uint32_t maxPageSearchNum = 5);
   // dtor
   ~PBRB();
@@ -57,10 +58,10 @@ class PBRB {
     auto outputVector = [](std::vector<double> &vec, std::string &&name) {
       double total = std::accumulate<std::vector<double>::iterator, double>(
           vec.begin(), vec.end(), 0);
-      NKV_LOG_I(
-          std::cout,
-          "Number of {}: {}, total time cost: {:.2f} s, average time cost: {:.2f} ns",
-          name, vec.size(), total / 1000000000, total / vec.size());
+      NKV_LOG_I(std::cout,
+                "Number of {}: {}, total time cost: {:.2f} s, average time "
+                "cost: {:.2f} ns",
+                name, vec.size(), total / 1000000000, total / vec.size());
     };
     outputVector(findSlotNss, std::string("findSlotNss"));
     outputVector(fcrpNss, std::string("fcrpNss"));
@@ -85,9 +86,10 @@ class PBRB {
 
   // A Map to store pages used by different SKV table, and one SKV table
   // corresponds to a list
-  std::map<int, std::list<BufferPage *>> _usedPageMap;
+  std::map<SchemaId, std::list<BufferPage *>> _usedPageMap;
 
-  IndexerT *_indexer;
+  IndexerList * _indexListPtr;
+
   uint32_t _splitCnt = 0;
   uint32_t _evictCnt = 0;
 
@@ -225,8 +227,8 @@ class PBRB {
 
   void outputHitRatios() {
     for (auto &it : _AccStatBySchema) {
-      NKV_LOG_I(std::cout, "SchemaId: {}, Hit Ratio: {} / {} = {:.2f}", it.first,
-                it.second.hitCount, it.second.accessCount,
+      NKV_LOG_I(std::cout, "SchemaId: {}, Hit Ratio: {} / {} = {:.2f}",
+                it.first, it.second.hitCount, it.second.accessCount,
                 (double)it.second.hitCount / it.second.accessCount);
     }
   }

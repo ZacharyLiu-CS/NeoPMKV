@@ -43,7 +43,7 @@ class NeoPMKV {
       // get the timestamp now
       TimeStamp ts_start_pbrb;
       ts_start_pbrb.getNow();
-      _pbrb = new PBRB(maxPageNum, &ts_start_pbrb, &_indexer, &_sUMap);
+      _pbrb = new PBRB(maxPageNum, &ts_start_pbrb, &_indexerList, &_sUMap);
     }
   }
   ~NeoPMKV() {
@@ -61,6 +61,7 @@ class NeoPMKV {
     Schema newSchema =
         _schemaAllocator.createSchema(name, primarykey_id, fields);
     _sUMap.addSchema(newSchema);
+    _indexerList.insert({newSchema.schemaId, std::make_shared<IndexerT>()});
     return newSchema.schemaId;
   }
 
@@ -70,9 +71,14 @@ class NeoPMKV {
   bool scan(Key &start, std::vector<Value> &value_list, uint32_t scan_len);
 
  private:
-  bool getValueFromIndexIterator(IndexerIterator &idxIter, Value &value);
+  bool checkSchemaIdValid(SchemaId id) {
+    return _sUMap.find(id) == nullptr ? false : true;
+  }
+  bool getValueFromIndexIterator(IndexerIterator &idxIter,
+                                 std::shared_ptr<IndexerT> indexer,
+                                 SchemaId schemaid, Value &value);
   // use store the key -> valueptr
-  IndexerT _indexer;
+  IndexerList _indexerList;
   // use to allocate schema
   SchemaAllocator _schemaAllocator;
   // store schema id -> schema (unordered map)
@@ -98,19 +104,19 @@ class NeoPMKV {
 
  public:
   void outputReadStat() {
-    NKV_LOG_I(
-        std::cout,
-        "PMem: Read Count: {}, Total Time Cost: {:.2f} s, Average Time Cost: {:.2f} ns",
-        _durationStat.pmemReadCount, _durationStat.pmemReadTimeSecs,
-        _durationStat.pmemReadTimeSecs / _durationStat.pmemReadCount *
-            1000000000);
+    NKV_LOG_I(std::cout,
+              "PMem: Read Count: {}, Total Time Cost: {:.2f} s, Average Time "
+              "Cost: {:.2f} ns",
+              _durationStat.pmemReadCount, _durationStat.pmemReadTimeSecs,
+              _durationStat.pmemReadTimeSecs / _durationStat.pmemReadCount *
+                  1000000000);
 
-    NKV_LOG_I(
-        std::cout,
-        "PBRB: Read Count: {}, Total Time Cost: {:.2f} s, Average Time Cost: {:.2f} ns",
-        _durationStat.pbrbReadCount, _durationStat.pbrbReadTimeSecs,
-        _durationStat.pbrbReadTimeSecs / _durationStat.pbrbReadCount *
-            1000000000);
+    NKV_LOG_I(std::cout,
+              "PBRB: Read Count: {}, Total Time Cost: {:.2f} s, Average Time "
+              "Cost: {:.2f} ns",
+              _durationStat.pbrbReadCount, _durationStat.pbrbReadTimeSecs,
+              _durationStat.pbrbReadTimeSecs / _durationStat.pbrbReadCount *
+                  1000000000);
   }
 #endif
 };

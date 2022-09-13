@@ -22,7 +22,7 @@ if(BREAKDOWN)
   add_compile_definitions(ENABLE_BREAKDOWN)
 endif(BREAKDOWN)
 
-option(STATISTIS "Enable Statistic of pmem and pbrb" ON)
+option(STATISTICS "Enable Statistic of pmem and pbrb" ON)
 if(STATISTICS)
   message("Enable NeoPMKV Statistic!")
   add_compile_definitions(ENABLE_STATISTICS)
@@ -75,6 +75,7 @@ install(TARGETS ${PROJECT_NAME} DESTINATION lib)
 install(FILES ${HEADERS} DESTINATION include)
 
 if(BUILD_TESTS)
+  message("Build test programs")
   #10. define gtest path
   set(GTEST_LIBRARY ${PROJECT_SOURCE_DIR}/third_party/googletest/build/lib)
   set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)

@@ -9,7 +9,7 @@
 #include "pbrb.h"
 
 namespace NKV {
-PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer,
+PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
            SchemaUMap *umap, uint32_t maxPageSearchNum) {
   // check headerSizes
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
@@ -19,7 +19,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerT *indexer,
   _watermark = *wm;
   _schemaUMap = umap;
   _maxPageNumber = maxPageNumber;
-  _indexer = indexer;
+  _indexListPtr = indexerListPtr;
   _maxPageSearchingNum = maxPageSearchNum;
 
   // allocate bufferpage
@@ -244,7 +244,7 @@ inline RowOffset PBRB::findEmptySlotInPage(BufferListBySchema &blbs,
   timer.start();
 #endif
   uint32_t result = pagePtr->getFirstZeroBit(blbs.maxRowCnt);
-  
+
 #ifdef ENABLE_BREAKDOWN
   timer.end();
   findSlotNss.emplace_back(timer.duration() * 1000000000);
@@ -301,7 +301,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
   PointProfiler fcrpTimer;
   fcrpTimer.start();
 #endif
-  if (iter == _indexer->end()) {
+  if (iter == _indexListPtr->at(schemaID)->end()) {
     NKV_LOG_E(std::cerr, "iter == _indexer->end()");
     return std::make_pair(nullptr, 0);
   }
@@ -327,7 +327,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
   BufferPage *prevPagePtr = nullptr;
   RowOffset prevOff = UINT32_MAX;
   for (int i = 0; i < maxIdxSearchNum; i++) {
-    if (prevIter != _indexer->begin()) {
+    if (prevIter != _indexListPtr->at(schemaID)->begin()) {
       prevIter--;
       auto valuePtr = &prevIter->second;
       if (valuePtr->isHot()) {
@@ -342,9 +342,9 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 
   BufferPage *nextPagePtr = nullptr;
   RowOffset nextOff = UINT32_MAX;
-  for (int i = 0; i < maxIdxSearchNum && nextIter != _indexer->end(); i++) {
+  for (int i = 0; i < maxIdxSearchNum && nextIter != _indexListPtr->at(schemaID)->end(); i++) {
     nextIter++;
-    if (nextIter == _indexer->end()) break;
+    if (nextIter == _indexListPtr->at(schemaID)->end()) break;
     auto valuePtr = &nextIter->second;
     if (valuePtr->isHot()) {
       RowAddr rowAddr = valuePtr->getPBRBAddr();

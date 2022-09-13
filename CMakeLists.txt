@@ -16,13 +16,17 @@ else( CMAKE_BUILD_TYPE STREQUAL "Release" )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -fopenmp")
 endif( CMAKE_BUILD_TYPE STREQUAL "Debug" )
 
-if(BREAKDOWN STREQUAL "ON")
+option(BREAKDOWN "Enable PBRB Breakdown" ON)
+if(BREAKDOWN)
+  message("Enable PBRB Breakdown!")
   add_compile_definitions(ENABLE_BREAKDOWN)
-endif(BREAKDOWN STREQUAL "ON")
+endif(BREAKDOWN)
 
-if(STATISTICS STREQUAL "ON")
+option(STATISTIS "Enable Statistic of pmem and pbrb" ON)
+if(STATISTICS)
+  message("Enable NeoPMKV Statistic!")
   add_compile_definitions(ENABLE_STATISTICS)
-endif(STATISTICS STREQUAL "ON")
+endif(STATISTICS)
 
 # find_package(PkgConfig REQUIRED)
 # pkg_check_modules(LIBPMEMKV REQUIRED libpmemkv)
@@ -63,13 +67,20 @@ target_link_libraries( ${PROJECT_NAME}
   pmem
   fmt::fmt
   )
+#9. define the install path
+set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/neopmkv)
+MESSAGE("Install prefix is: ${CMAKE_INSTALL_PREFIX}")
+file(GLOB HEADERS ${PROJECT_SOURCE_DIR}/include/*.h)
+install(TARGETS ${PROJECT_NAME} DESTINATION lib)
+install(FILES ${HEADERS} DESTINATION include)
+
 if(BUILD_TESTS)
-  #9. define gtest path
+  #10. define gtest path
   set(GTEST_LIBRARY ${PROJECT_SOURCE_DIR}/third_party/googletest/build/lib)
   set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
   set(GTEST_MAIN_LIBRARY ${GTEST_LIBRARY})
 
-  #10. compile test files
+  #11. compile test files
   find_package(GTest)
   enable_testing()
   if (GTEST_FOUND)

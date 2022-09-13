@@ -59,7 +59,7 @@ class PBRB {
           vec.begin(), vec.end(), 0);
       NKV_LOG_I(
           std::cout,
-          "Number of {}: {}, total time cost: {} s, average time cost: {} ns",
+          "Number of {}: {}, total time cost: {:.2f} s, average time cost: {:.2f} ns",
           name, vec.size(), total / 1000000000, total / vec.size());
     };
     outputVector(findSlotNss, std::string("findSlotNss"));
@@ -78,7 +78,7 @@ class PBRB {
   uint32_t _rowHeaderSize = ROW_HEADER_SIZE;
 
   uint32_t _maxPageSearchingNum;
-  std::string _fcrpOutputFileName;
+
   // A list to store allocated free pages
   BufferPage *_bufferPoolPtr = nullptr;
   std::list<BufferPage *> _freePageList;
@@ -91,7 +91,6 @@ class PBRB {
   uint32_t _splitCnt = 0;
   uint32_t _evictCnt = 0;
 
-  SchemaAllocator _schemaAllocator;
   SchemaUMap *_schemaUMap;
 
   friend class BufferListBySchema;
@@ -226,7 +225,7 @@ class PBRB {
 
   void outputHitRatios() {
     for (auto &it : _AccStatBySchema) {
-      NKV_LOG_I(std::cout, "SchemaId: {}, Hit Ratio: {} / {} = {}", it.first,
+      NKV_LOG_I(std::cout, "SchemaId: {}, Hit Ratio: {} / {} = {:.2f}", it.first,
                 it.second.hitCount, it.second.accessCount,
                 (double)it.second.hitCount / it.second.accessCount);
     }

@@ -100,14 +100,14 @@ class NeoPMKV {
   void outputReadStat() {
     NKV_LOG_I(
         std::cout,
-        "PMem: Read Count: {}, Total Time Cost: {}s, Average Time Cost: {}ns",
+        "PMem: Read Count: {}, Total Time Cost: {:.2f} s, Average Time Cost: {:.2f} ns",
         _durationStat.pmemReadCount, _durationStat.pmemReadTimeSecs,
         _durationStat.pmemReadTimeSecs / _durationStat.pmemReadCount *
             1000000000);
 
     NKV_LOG_I(
         std::cout,
-        "PBRB: Read Count: {}, Total Time Cost: {}s, Average Time Cost: {}ns",
+        "PBRB: Read Count: {}, Total Time Cost: {:.2f} s, Average Time Cost: {:.2f} ns",
         _durationStat.pbrbReadCount, _durationStat.pbrbReadTimeSecs,
         _durationStat.pbrbReadTimeSecs / _durationStat.pbrbReadCount *
             1000000000);

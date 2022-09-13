@@ -7,6 +7,7 @@
 //
 
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -210,13 +211,10 @@ struct Schema {
 };
 
 struct SchemaAllocator {
-  uint32_t idx = 0;
-  std::mutex mutex_;
+  std::atomic_uint32_t idx{1};
   Schema createSchema(std::string name, uint32_t primaryKeyField,
                       std::vector<SchemaField> &fields) {
-    std::lock_guard<std::mutex> guard(mutex_);
-    idx += 1;
-    return Schema(name, idx, primaryKeyField, fields);
+    return Schema(name, idx.fetch_add(1), primaryKeyField, fields);
   }
 };
 class SchemaUMap {

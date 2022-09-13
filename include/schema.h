@@ -204,9 +204,16 @@ struct Schema {
     }
     // Initializa the size
     for (auto i : fields) {
-      size += i.size;
+      size += i.size + sizeof(uint32_t);
     }
     return size;
+  }
+  uint32_t getOffset(const std::string &name){
+    uint32_t offset = 0;
+    for(auto i : fields){
+      offset += i.size + sizeof(uint32_t);
+    }
+    return offset;
   }
 };
 

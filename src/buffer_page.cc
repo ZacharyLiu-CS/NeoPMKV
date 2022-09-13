@@ -11,73 +11,8 @@
 #include "logging.h"
 namespace NKV {
 
-// 1. Header 'set' and 'get' functions.
 
-// set (magic, 0, 2)
-void BufferPage::setMagicPage(uint16_t magic) {
-  // magic is 2 bytes;
-  writeToPage<uint16_t>(0, &magic, 2);
-}
 
-// get (magic, 0, 2)
-uint16_t BufferPage::getMagicPage() { return readFromPage<uint16_t>(0, 2); }
-
-// set (schemaID, 2, 4)
-void BufferPage::setSchemaIDPage(uint32_t schemaID) {
-  writeToPage<SchemaId>(2, &schemaID, 4);
-}
-
-// get (schemaID, 2, 4)
-SchemaId BufferPage::getSchemaIDPage() { return readFromPage<uint32_t>(2, 4); }
-
-// set (schemaVer, 6, 2)
-void BufferPage::setSchemaVerPage(uint16_t schemaVer) {
-  writeToPage<uint16_t>(6, &schemaVer, 2);
-}
-
-// get (schemaVer, 6, 2)
-uint16_t BufferPage::getSchemaVerPage() {  // schemaVer is 2 bytes
-  return readFromPage<uint16_t>(6, 2);
-}
-
-// get (prevPagePtr, 8, 8)
-void BufferPage::setPrevPage(BufferPage *prevPagePtr) {
-  writeToPage<BufferPage *>(8, &prevPagePtr, 8);
-}
-
-// set (prevPagePtr, 8, 8)
-BufferPage *BufferPage::getPrevPage() {
-  return readFromPage<BufferPage *>(8, 8);
-}
-
-// set (nextPagePtr, 16, 8)
-void BufferPage::setNextPage(
-    BufferPage *nextPagePtr) {  // page pointer is 8 bytes
-  writeToPage<BufferPage *>(16, &nextPagePtr, 8);
-}
-
-// get (nextPagePtr, 16, 8)
-BufferPage *BufferPage::getNextPage() {
-  return readFromPage<BufferPage *>(16, 8);
-}
-
-// set (hotRowsNum, 24, 2)
-void BufferPage::setHotRowsNumPage(uint16_t hotRowsNum) {
-  writeToPage<uint16_t>(24, &hotRowsNum, 2);
-}
-
-// set (hotRowsNum, 24, 2)
-uint16_t BufferPage::getHotRowsNumPage() {
-  return readFromPage<uint16_t>(24, 2);
-}
-
-void BufferPage::setReservedHeader() {  // reserved is 38 bytes
-  memset(content + 26, 0, PAGE_HEADER_SIZE - 26);
-}
-
-void BufferPage::clearPageBitMap(uint32_t occuBitmapSize) {
-  memset(content + PAGE_HEADER_SIZE, 0, occuBitmapSize);
-}
 
 bool BufferPage::setRowBitMapPage(RowOffset rowOffset) {
   if (isBitmapSet(rowOffset)) return false;

@@ -34,13 +34,13 @@ struct OccupancyBitmap {
 } __attribute__((packed));
 
 struct PageHeader {
-  char magic[2];
-  SchemaId schemaId;
-  SchemaVer schemaVer;
-  BufferPage *prevPagePtr;
-  BufferPage *nextpagePtr;
-  uint16_t howRowNum;
-  char reserved[38];
+  uint16_t magic = 0;
+  SchemaId schemaId = 0;
+  SchemaVer schemaVer = 0;
+  BufferPage *prevPagePtr = nullptr;
+  BufferPage *nextpagePtr = nullptr;
+  uint16_t howRowNum = 0;
+  char reserved[38]={'\0'};
 } __attribute__((packed));
 
 struct RowHeader {
@@ -55,7 +55,7 @@ class BufferPage {
   unsigned char content[pageSize];
   // From srcPtr, write size byte(s) of data to pagePtr with offset.
   template <typename T>
-  void writeToPage(size_t offset, const T *srcPtr, size_t size) {
+  inline void writeToPage(size_t offset, const T *srcPtr, size_t size) {
     const void *sPtr = static_cast<const void *>(srcPtr);
     void *destPtr = static_cast<void *>(content + offset);
     memcpy(destPtr, sPtr, size);
@@ -63,7 +63,7 @@ class BufferPage {
 
   // Read from pagePtr + offset with size to srcPtr;
   template <typename T>
-  T readFromPage(size_t offset, size_t size) const {
+  inline T readFromPage(size_t offset, size_t size) const {
     T result;
     void *dPtr = static_cast<void *>(&result);
     const void *sPtr = static_cast<const void *>(content + offset);
@@ -71,84 +71,111 @@ class BufferPage {
     return result;
   }
 
-  void readFromPage(size_t offset, size_t size, void *dPtr) const {
+  inline void readFromPage(size_t offset, size_t size, void *dPtr) const {
     const void *sPtr = static_cast<const void *>(content + offset);
     memcpy(dPtr, sPtr, size);
   }
 
   // set (magic, 0, 2)
-  void setMagicPage(uint16_t magic);
+  inline void setMagicPage(uint16_t magic) {
+    ((PageHeader *)content)->magic = magic;
+  }
   // get (magic, 0, 2)
-  uint16_t getMagicPage();
+  inline uint16_t getMagicPage() { return ((PageHeader *)content)->magic; }
 
   // set (schemaID, 2, 4)
-  void setSchemaIDPage(uint32_t schemaID);
+  inline void setSchemaIDPage(uint32_t schemaID) {
+    ((PageHeader *)content)->schemaId = schemaID;
+  }
 
   // get (schemaID, 2, 4)
-  SchemaId getSchemaIDPage();
+  inline SchemaId getSchemaIDPage() {
+    return ((PageHeader *)content)->schemaId;
+  }
 
   // set (schemaVer, 6, 2)
-  void setSchemaVerPage(uint16_t schemaVer);
+  inline void setSchemaVerPage(uint16_t schemaVer) {
+    ((PageHeader *)content)->schemaVer = schemaVer;
+  }
 
   // get (schemaVer, 6, 2)
-  uint16_t getSchemaVerPage();
+  inline uint16_t getSchemaVerPage() {
+    return ((PageHeader *)content)->schemaVer;
+  }
 
   // get (prevPagePtr, 8, 8)
-  void setPrevPage(BufferPage *prevPagePtr);
+  inline void setPrevPage(BufferPage *prevPagePtr) {
+    ((PageHeader *)content)->prevPagePtr = prevPagePtr;
+  }
 
   // set (prevPagePtr, 8, 8)
-  BufferPage *getPrevPage();
+  inline BufferPage *getPrevPage() {
+    return ((PageHeader *)content)->prevPagePtr;
+  }
 
   // set (nextPagePtr, 16, 8)
-  void setNextPage(BufferPage *nextPagePtr);
+  inline void setNextPage(BufferPage *nextPagePtr) {
+    ((PageHeader *)content)->nextpagePtr = nextPagePtr;
+  }
 
   // get (nextPagePtr, 16, 8)
-  BufferPage *getNextPage();
+  inline BufferPage *getNextPage() {
+    return ((PageHeader *)content)->nextpagePtr;
+  }
 
   // set (hotRowsNum, 24, 2)
-  void setHotRowsNumPage(uint16_t hotRowsNum);
+  inline void setHotRowsNumPage(uint16_t hotRowsNum) {
+    ((PageHeader *)content)->howRowNum = hotRowsNum;
+  }
 
   // set (hotRowsNum, 24, 2)
-  uint16_t getHotRowsNumPage();
+  inline uint16_t getHotRowsNumPage() {
+    return ((PageHeader *)content)->howRowNum;
+  }
 
-  void setReservedHeader();
+  inline void setReservedHeader() {  // reserved is 38 bytes
+    memset(((PageHeader *)content)->reserved, 0, 38);
+  }
 
-  void clearPageBitMap(uint32_t occuBitmapSize);
+  inline void clearPageBitMap(uint32_t occuBitmapSize) {
+    memset(content + PAGE_HEADER_SIZE, 0, occuBitmapSize);
+  }
+
 
   // 1.2 Row get & set functions.
 
   // Row Struct:
   // CRC (4) | Timestamp (8) | PlogAddr (8) | KVNodeAddr(8)
   // CRC:
-  uint32_t getCRCRow();
-  void setCRCRow();
+  inline uint32_t getCRCRow();
+  inline void setCRCRow();
 
   // Timestamp: (RowAddr + 4, 8)
-  TimeStamp getTimestampRow(RowAddr rAddr) {
+  inline TimeStamp getTimestampRow(RowAddr rAddr) {
     return ((RowHeader *)rAddr)->timestamp;
   }
-  void setTimestampRow(RowAddr rAddr, TimeStamp &ts) {
+  inline void setTimestampRow(RowAddr rAddr, TimeStamp &ts) {
     ((RowHeader *)rAddr)->timestamp = ts;
   }
 
   // PlogAddr: (RowAddr + 12, 8)
-  PmemAddress getPlogAddrRow(RowAddr rAddr) {
+  inline PmemAddress getPlogAddrRow(RowAddr rAddr) {
     return ((RowHeader *)rAddr)->pmemAddr;
   }
-  void setPlogAddrRow(RowAddr rAddr, PmemAddress plogAddr) {
+  inline void setPlogAddrRow(RowAddr rAddr, PmemAddress plogAddr) {
     ((RowHeader *)rAddr)->pmemAddr = plogAddr;
   }
 
   // KVNodeAddr: (RowAddr + 20, 8)
-  ValuePtr *getKVNodeAddrRow(RowAddr rAddr) {
+  inline ValuePtr *getKVNodeAddrRow(RowAddr rAddr) {
     return ((RowHeader *)rAddr)->kvNodeAddr;
   }
-  void setKVNodeAddrRow(RowAddr rAddr, ValuePtr *kvNodeAddr) {
+  inline void setKVNodeAddrRow(RowAddr rAddr, ValuePtr *kvNodeAddr) {
     ((RowHeader *)rAddr)->kvNodeAddr = kvNodeAddr;
   }
 
   // Value:
-  Value getValueRow(RowAddr rAddr, uint32_t valueSize) {
+  inline Value getValueRow(RowAddr rAddr, uint32_t valueSize) {
     char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
     std::string value = std::string(valueAddr, valueSize);
     return value;

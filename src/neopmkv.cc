@@ -74,6 +74,7 @@ bool NeoPMKV::get(Key &key, std::string &value) {
   IndexerIterator idxIter = indexer->find(key.primaryKey);
   return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value);
 }
+
 bool NeoPMKV::put(Key &key, const std::string &value) {
   if (checkSchemaIdValid(key.schemaId) == false) {
     return false;

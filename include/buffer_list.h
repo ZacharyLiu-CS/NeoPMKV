@@ -20,12 +20,11 @@ class BufferListBySchema {
  private:
   Schema *ownSchema = nullptr;
   uint32_t occuBitmapSize;
-  uint32_t nullableBitmapSize;
   uint32_t maxRowCnt;
-  std::vector<FieldMetaData> fieldsInfo;
   uint32_t valueSize = 0;
-  uint32_t rowSize;
+  uint32_t rowSize = 0;
 
+  uint32_t firstRowOffset = 0;
   uint32_t curPageNum = 0;
   uint32_t curRowNum = 0;
 
@@ -47,7 +46,6 @@ class BufferListBySchema {
     tailPage = headPagePtr;
     setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
   }
-  void setNullBitmapSize(uint32_t fieldNumber);
   void setOccuBitmapSize(uint32_t pageSize);
   void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize,
                uint32_t rowHeaderSize);

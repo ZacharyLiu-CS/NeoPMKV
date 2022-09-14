@@ -37,7 +37,7 @@ struct Key {
   //   this->schemaId = schemaId;
   //   generatePK(pkValue);
   // }
-  Key(uint32_t schemaId, uint64_t pkValue){
+  Key(uint32_t schemaId, uint64_t pkValue) {
     this->schemaId = schemaId;
     primaryKey = pkValue;
   }
@@ -64,13 +64,9 @@ using Value = std::string;
 
 class ValuePtr {
  public:
-  ValuePtr() {
-    updateLock_ = new std::mutex;
-  }
+  ValuePtr() { updateLock_ = new std::mutex; }
 
-  ~ValuePtr() {
-    delete updateLock_;
-  }
+  ~ValuePtr() { delete updateLock_; }
 
   ValuePtr(const ValuePtr &valuePtr) {
     updateLock_ = new std::mutex;
@@ -188,6 +184,7 @@ struct Schema {
   uint32_t schemaId = ERRMASK;
   uint32_t primaryKeyField = 0;
   std::vector<SchemaField> fields;
+  std::vector<FieldMetaData> fieldsMeta;
   uint32_t size = 0;
   Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
          std::vector<SchemaField> &fields)
@@ -197,23 +194,35 @@ struct Schema {
         primaryKeyField(primaryKeyField),
         fields(fields) {
     (void)getSize();
+    uint32_t currentOffset = 0;
+    uint32_t fieldHead = sizeof(uint32_t);
+    for (auto i : fields) {
+      fieldsMeta.push_back(FieldMetaData());
+      auto &field_meta = fieldsMeta.back();
+      currentOffset += fieldHead;
+      field_meta.fieldSize = i.size;
+      field_meta.fieldOffset = currentOffset;
+      field_meta.isNullable = false;
+      field_meta.isVariable = false;
+      currentOffset += i.size;
+    }
   }
   uint32_t getSize() {
-    if (size != 0) {
-      return size;
-    }
+    if (size != 0) return size;
     // Initializa the size
-    for (auto i : fields) {
-      size += i.size + sizeof(uint32_t);
-    }
+    for (auto i : fields) size += i.size + sizeof(uint32_t);
     return size;
   }
-  uint32_t getOffset(const std::string &name){
-    uint32_t offset = 0;
-    for(auto i : fields){
-      offset += i.size + sizeof(uint32_t);
+  inline uint32_t getOffset(uint32_t fieldId) {
+    return fieldsMeta[fieldId].fieldOffset;
+  }
+  inline uint32_t getOffset(const std::string &fieldName) {
+    uint32_t fieldId = 0;
+    for (auto i : fields) {
+      if (i.name == fieldName) return fieldId;
+      fieldId += 1;
     }
-    return offset;
+    return getOffset(fieldId);
   }
 };
 

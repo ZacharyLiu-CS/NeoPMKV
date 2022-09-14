@@ -51,10 +51,11 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   }
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = _freePageList.front();
-  BufferListBySchema blbs(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize,
-                          _schemaUMap, pagePtr);
-  _bufferMap.insert_or_assign(schemaId, blbs);
 
+  _bufferMap.insert_or_assign(
+      schemaId, BufferListBySchema(schemaId, _pageSize, _pageHeaderSize,
+                                   _rowHeaderSize, _schemaUMap, pagePtr));
+  BufferListBySchema &blbs = _bufferMap[schemaId];
   NKV_LOG_I(
       std::cout,
       "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList "
@@ -208,9 +209,9 @@ std::pair<BufferPage *, RowOffset> PBRB::findPageAndRowByAddr(void *rowAddr) {
   SchemaId sid = pagePtr->getSchemaIDPage();
   BufferListBySchema &blbs = _bufferMap[sid];
   RowOffset rowOff =
-      (offset - blbs.fieldsInfo[0].fieldOffset - _pageHeaderSize) /
+      (offset - blbs.firstRowOffset - _pageHeaderSize) /
       blbs.rowSize;
-  if ((offset - blbs.fieldsInfo[0].fieldOffset - _pageHeaderSize) %
+  if ((offset - blbs.firstRowOffset - _pageHeaderSize) %
           blbs.rowSize !=
       0)
     NKV_LOG_I(std::cout, "WARN: offset maybe wrong!");
@@ -221,7 +222,7 @@ RowAddr PBRB::getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff) {
   SchemaId sid = pagePtr->getSchemaIDPage();
   BufferListBySchema &blbs = _bufferMap[sid];
   uint32_t offset =
-      _pageHeaderSize + blbs.fieldsInfo[0].fieldOffset + rowOff * blbs.rowSize;
+      _pageHeaderSize + blbs.firstRowOffset + rowOff * blbs.rowSize;
   return (uint8_t *)pagePtr + offset;
 }
 
@@ -342,7 +343,9 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 
   BufferPage *nextPagePtr = nullptr;
   RowOffset nextOff = UINT32_MAX;
-  for (int i = 0; i < maxIdxSearchNum && nextIter != _indexListPtr->at(schemaID)->end(); i++) {
+  for (int i = 0;
+       i < maxIdxSearchNum && nextIter != _indexListPtr->at(schemaID)->end();
+       i++) {
     nextIter++;
     if (nextIter == _indexListPtr->at(schemaID)->end()) break;
     auto valuePtr = &nextIter->second;

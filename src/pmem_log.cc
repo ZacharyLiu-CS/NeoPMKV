@@ -103,7 +103,14 @@ Status PmemLog::append(PmemAddress &pmemAddr, const char *value,
   return PmemStatuses::S200_OK_Append;
 }
 
-Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
+Status PmemLog::write(PmemAddress writeAddr, const char *value, uint32_t size) {
+  if (writeAddr > _tail_offset.load()) {
+    return PmemStatuses::S403_Forbidden_Invalid_Offset;
+  }
+  _write(writeAddr, value, size);
+  return PmemStatuses::S200_OK_Write;
+}
+Status PmemLog::read(PmemAddress readAddr, std::string &value) {
   // checkout the effectiveness of start_offset
   if (readAddr > _tail_offset.load()) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;

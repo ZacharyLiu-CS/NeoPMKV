@@ -24,6 +24,7 @@ using SchemaVer = uint16_t;
 
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
+const uint32_t PmemEntryHead =  sizeof(uint32_t);
 
 using RowAddr = void *;
 const uint32_t ERRMASK = 1 << 31;
@@ -64,32 +65,30 @@ using Value = std::string;
 
 class ValuePtr {
  public:
-  ValuePtr() { updateLock_ = new std::mutex; }
+  ValuePtr() { }
 
-  ~ValuePtr() { delete updateLock_; }
+  ~ValuePtr() { }
 
   ValuePtr(const ValuePtr &valuePtr) {
-    updateLock_ = new std::mutex;
     _timestamp = valuePtr._timestamp;
-    _addr = valuePtr._addr;
+    _pmemAddr = valuePtr._pmemAddr;
+    _pbrbAddr = valuePtr._pbrbAddr;
     _isHot = valuePtr._isHot;
   }
 
  private:
-  std::mutex *updateLock_ = nullptr;
-  TimeStamp _timestamp;
-  union Addr {
-    PmemAddress pmemAddr;
-    RowAddr pbrbAddr;
-  } _addr;
+  std::mutex _updateLock;
+  TimeStamp _timestamp = {0};
+  PmemAddress _pmemAddr = 0;
+  RowAddr _pbrbAddr = 0;
   bool _isHot = false;
 
  public:
   TimeStamp getTimestamp() { return _timestamp; }
 
-  PmemAddress getPmemAddr() { return _addr.pmemAddr; }
+  PmemAddress getPmemAddr() { return _pmemAddr; }
 
-  RowAddr getPBRBAddr() { return _addr.pbrbAddr; }
+  RowAddr getPBRBAddr() { return _pbrbAddr; }
 
   bool isHot() { return _isHot; }
 
@@ -97,28 +96,28 @@ class ValuePtr {
   void updateTS(TimeStamp newTS) { this->_timestamp = newTS; }
 
   void updatePmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
-    std::lock_guard<std::mutex> lock(*updateLock_);
+    std::lock_guard<std::mutex> lock(_updateLock);
     this->_isHot = false;
-    this->_addr.pmemAddr = pmAddr;
+    this->_pmemAddr = pmAddr;
     this->_timestamp = newTS;
   }
   void updatePmemAddr(PmemAddress pmAddr) {
-    std::lock_guard<std::mutex> lock(*updateLock_);
+    std::lock_guard<std::mutex> lock(_updateLock);
     this->_isHot = false;
-    this->_addr.pmemAddr = pmAddr;
+    this->_pmemAddr = pmAddr;
     this->_timestamp.getNow();
   }
 
   void updatePBRBAddr(RowAddr rowAddr, TimeStamp newTS) {
-    std::lock_guard<std::mutex> lock(*updateLock_);
+    std::lock_guard<std::mutex> lock(_updateLock);
     this->_isHot = true;
-    this->_addr.pbrbAddr = rowAddr;
+    this->_pbrbAddr = rowAddr;
     this->_timestamp = newTS;
   }
   void updatePBRBAddr(RowAddr rowAddr) {
-    std::lock_guard<std::mutex> lock(*updateLock_);
+    std::lock_guard<std::mutex> lock(_updateLock);
     this->_isHot = true;
-    this->_addr.pbrbAddr = rowAddr;
+    this->_pbrbAddr = rowAddr;
     this->_timestamp.getNow();
   }
 };
@@ -195,16 +194,15 @@ struct Schema {
         fields(fields) {
     (void)getSize();
     uint32_t currentOffset = 0;
-    uint32_t fieldHead = sizeof(uint32_t);
+    uint32_t fieldHeadSize = sizeof(uint32_t);
     for (auto i : fields) {
       fieldsMeta.push_back(FieldMetaData());
       auto &field_meta = fieldsMeta.back();
-      currentOffset += fieldHead;
       field_meta.fieldSize = i.size;
       field_meta.fieldOffset = currentOffset;
       field_meta.isNullable = false;
       field_meta.isVariable = false;
-      currentOffset += i.size;
+      currentOffset += i.size + fieldHeadSize;
     }
   }
   uint32_t getSize() {
@@ -213,16 +211,16 @@ struct Schema {
     for (auto i : fields) size += i.size + sizeof(uint32_t);
     return size;
   }
-  inline uint32_t getOffset(uint32_t fieldId) {
-    return fieldsMeta[fieldId].fieldOffset;
+  inline uint32_t getPmemOffset(uint32_t fieldId) {
+    return fieldsMeta[fieldId].fieldOffset + PmemEntryHead;
   }
-  inline uint32_t getOffset(const std::string &fieldName) {
+  inline uint32_t getPmemOffset(const std::string &fieldName) {
     uint32_t fieldId = 0;
     for (auto i : fields) {
       if (i.name == fieldName) return fieldId;
       fieldId += 1;
     }
-    return getOffset(fieldId);
+    return getPmemOffset(fieldId);
   }
 };
 

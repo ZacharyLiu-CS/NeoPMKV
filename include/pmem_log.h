@@ -48,7 +48,10 @@ class PmemLog : public PmemEngine {
   Status append(PmemAddress &pmemAddr, const char *value,
                 uint32_t size) override;
 
-  Status read(const PmemAddress &readAddr, std::string &value) override;
+  Status write(PmemAddress writeAddr, const char *value,
+               uint32_t size) override;
+
+  Status read(PmemAddress readAddr, std::string &value) override;
 
   Status seal() override;
 
@@ -73,7 +76,7 @@ class PmemLog : public PmemEngine {
         _chunk_list[now_tail_offset / _plog_meta.chunk_size].pmem_addr +
         now_tail_offset % _plog_meta.chunk_size;
     NKV_LOG_D(std::cout,
-              "Write data: len=>{} to offset=>{}, activate chunk id=>{}", len,
+              "Append data: len=>{} to offset=>{}, activate chunk id=>{}", len,
               now_tail_offset, _active_chunk_id.load());
 
     *(uint32_t *)pmem_addr = len;
@@ -87,12 +90,25 @@ class PmemLog : public PmemEngine {
   }
 
   // private _read function to read data from given offset and length
-  inline void _read(char *dst, uint64_t offset, uint64_t len) {
-    NKV_LOG_D(std::cout, "Read data: offset =>{},len=>{}", offset, len);
-    uint32_t chunk_id = offset / _plog_meta.chunk_size;
+  inline void _read(char *dst, PmemAddress src, uint32_t len) {
+    NKV_LOG_D(std::cout, "Read data: offset =>{},len=>{}", src, len);
+    uint32_t chunk_id = src / _plog_meta.chunk_size;
     char *pmem_addr =
-        _chunk_list[chunk_id].pmem_addr + offset % _plog_meta.chunk_size;
+        _chunk_list[chunk_id].pmem_addr + src % _plog_meta.chunk_size;
     memcpy(dst, pmem_addr, len);
+  }
+
+  inline void _write(PmemAddress dst, const char *src, uint32_t len) {
+    NKV_LOG_D(std::cout, "Write data: offset =>{},len=>{}", dst, len);
+    uint32_t chunk_id = dst / _plog_meta.chunk_size;
+    char *pmem_addr =
+        _chunk_list[chunk_id].pmem_addr + dst % _plog_meta.chunk_size;
+    uint32_t head_size = sizeof(uint32_t);
+    if (_is_pmem) {
+      _copyToPmem(pmem_addr + head_size, src, len);
+    } else {
+      _copyToNonPmem(pmem_addr + head_size, src, len);
+    }
   }
 
   // Map an existing file

@@ -66,6 +66,7 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   }
   return true;
 }
+
 bool NeoPMKV::get(Key &key, std::string &value) {
   if (checkSchemaIdValid(key.schemaId) == false) {
     return false;
@@ -95,7 +96,44 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
   iter->second.updatePmemAddr(pmAddr);
   return true;
 }
+bool NeoPMKV::update(Key &key,
+                     std::vector<std::pair<std::string, std::string>> &values) {
+  if (checkSchemaIdValid(key.schemaId) == false) {
+    return false;
+  }
+  auto indexer = _indexerList[key.schemaId];
+  IndexerIterator idxIter = indexer->find(key.primaryKey);
+  if (idxIter != indexer->end()) return false;
+  ValuePtr &vPtr = idxIter->second;
+  PmemAddress pmemAddr = vPtr.getPmemAddr();
 
+  for (const auto &[fieldName, fieldContent] : values) {
+    uint32_t fieldOffset = _sUMap.find(key.schemaId)->getPmemOffset(fieldName);
+    _engine_ptr->write(pmemAddr + fieldOffset, fieldContent.c_str(),
+                       fieldContent.size());
+  }
+  vPtr.updatePmemAddr(pmemAddr);
+  return true;
+}
+bool NeoPMKV::update(Key &key,
+                     std::vector<std::pair<uint32_t, std::string>> &values) {
+  if (checkSchemaIdValid(key.schemaId) == false) {
+    return false;
+  }
+  auto indexer = _indexerList[key.schemaId];
+  IndexerIterator idxIter = indexer->find(key.primaryKey);
+  if (idxIter == indexer->end()) return false;
+  ValuePtr &vPtr = idxIter->second;
+  PmemAddress pmemAddr = vPtr.getPmemAddr();
+
+  for (const auto &[fieldId, fieldContent] : values) {
+    uint32_t fieldOffset = _sUMap.find(key.schemaId)->getPmemOffset(fieldId);
+    _engine_ptr->write(pmemAddr + fieldOffset, fieldContent.c_str(),
+                       fieldContent.size());
+  }
+  vPtr.updatePmemAddr(pmemAddr);
+  return true;
+}
 bool NeoPMKV::remove(Key &key) {
   if (checkSchemaIdValid(key.schemaId) == false) {
     return false;

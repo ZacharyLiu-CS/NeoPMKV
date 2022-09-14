@@ -59,11 +59,28 @@ void PBRBTest(bool enablePBRB) {
   };
   auto BuildKey = [sid](uint64_t i) -> Key { return Key(sid, i); };
 
+  auto BuildUpdatedValue = [](uint64_t i) -> Value {
+    std::string num_str = std::to_string(i + 33);
+    int zero_padding = 44 - num_str.size();
+    Value v;
+    v.append(zero_padding, '0').append(num_str);
+    return v;
+  };
+  auto BuildUpdates = [](uint64_t i) -> Value {
+    std::string num_str = std::to_string(i + 33);
+    int zero_padding = 16 - num_str.size();
+    Value v;
+    v.append(zero_padding, '0').append(num_str);
+    return v;
+  };
+
+  // test the put operation
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
     auto value = BuildValue(i);
     neopmkv_->put(key, value);
   }
+  // test the get the operation
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
     auto expect_value = BuildValue(i);
@@ -71,6 +88,21 @@ void PBRBTest(bool enablePBRB) {
     neopmkv_->get(key, read_value);
     ASSERT_EQ(read_value, expect_value);
   }
+  // test the update correctness
+  for (uint64_t i = 0; i < length; i++) {
+    auto key = BuildKey(i);
+    std::vector<std::pair<uint32_t, std::string>> update_values;
+    update_values.push_back({2, BuildUpdates(i)});
+    neopmkv_->update(key, update_values);
+  }
+  for (uint64_t i = 0; i < length; i++) {
+    auto key = BuildKey(i);
+    auto expect_value = BuildUpdatedValue(i);
+    Value read_value;
+    neopmkv_->get(key, read_value);
+    ASSERT_EQ(read_value, expect_value);
+  }
+  // test the remove operation
   int remove_length = 100;
   for (uint64_t i = 0; i < remove_length; i++) {
     auto key = BuildKey(i);
@@ -78,7 +110,7 @@ void PBRBTest(bool enablePBRB) {
   }
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
-    auto expect_value = BuildValue(i);
+    auto expect_value = BuildUpdatedValue(i);
     Value read_value;
     bool res = neopmkv_->get(key, read_value);
     if (i < remove_length)
@@ -91,7 +123,7 @@ void PBRBTest(bool enablePBRB) {
   int scan_length = 100;
   neopmkv_->scan(start_key, value_list, scan_length);
   for (uint64_t i = 0; i < value_list.size(); i++) {
-    auto expect_value = BuildValue(i + remove_length);
+    auto expect_value = BuildUpdatedValue(i + remove_length);
     NKV_LOG_D(std::cout, "Key [{}] expect value: {} read value: {}",
               i + remove_length, expect_value, value_list[i]);
     ASSERT_EQ(expect_value, value_list[i]);

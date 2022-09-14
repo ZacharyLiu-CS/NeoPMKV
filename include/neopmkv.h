@@ -65,12 +65,13 @@ class NeoPMKV {
     return newSchema.schemaId;
   }
 
-  // bool partial_get(Key &key,std::vector<> Value &value);
-  bool update(Key &key, std::vector<std::map<std::string, std::string>> &values);
-  bool update(Key &key, std::vector<std::map<uint32_t, std::string>> &values);
-
   bool get(Key &key, Value &value);
   bool put(Key &key, const Value &value);
+  // bool partial_get(Key &key,std::vector<> Value &value);
+  bool update(Key &key,
+              std::vector<std::pair<std::string, std::string>> &values);
+  bool update(Key &key, std::vector<std::pair<uint32_t, std::string>> &values);
+
   bool remove(Key &key);
   bool scan(Key &start, std::vector<Value> &value_list, uint32_t scan_len);
 

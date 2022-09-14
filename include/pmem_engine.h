@@ -66,6 +66,7 @@ struct PmemStatuses {
   // append data in pmem engine sucessfully
   static const inline Status S200_OK_Append { .code = 200, .message = "Append data to pemem engine successfully!" };
 
+  static const inline Status S200_OK_Write { .code = 200, .message = "Write data to pemem engine successfully!" };
   // 200 OK
   // find the required data in pmem engine
   static const inline Status S200_OK_Found { .code = 200, .message = "Found the required data!" };
@@ -176,10 +177,12 @@ class PmemEngine {
   virtual ~PmemEngine() { }
 
   virtual Status init(PmemEngineConfig& plog_meta) = 0;
-
+  // pmemAddr is the output parameter
   virtual Status append(PmemAddress &pmemAddr, const char *value, uint32_t size) = 0;
+  // pmemAddr is the input parameter
+  virtual Status write(PmemAddress writeAddr, const char *value, uint32_t size) = 0;
 
-  virtual Status read(const PmemAddress &readAddr, std::string& value) = 0;
+  virtual Status read(PmemAddress readAddr, std::string& value) = 0;
 
   virtual Status seal() = 0;
 

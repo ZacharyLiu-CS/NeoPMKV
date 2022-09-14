@@ -10,7 +10,7 @@
 
 namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-           SchemaUMap *umap, uint32_t maxPageSearchNum) {
+           SchemaUMap *umap, uint64_t retentionWindowSecs, uint32_t maxPageSearchNum) {
   // check headerSizes
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
   static_assert(ROW_HEADER_SIZE == 28, "ROW_HEADER_SIZE != 28");
@@ -21,6 +21,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   _maxPageNumber = maxPageNumber;
   _indexListPtr = indexerListPtr;
   _maxPageSearchingNum = maxPageSearchNum;
+  _retentionWindowSecs = retentionWindowSecs;
 
   // allocate bufferpage
   auto aligned_val = std::align_val_t{_pageSize};
@@ -209,11 +210,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findPageAndRowByAddr(void *rowAddr) {
   SchemaId sid = pagePtr->getSchemaIDPage();
   BufferListBySchema &blbs = _bufferMap[sid];
   RowOffset rowOff =
-      (offset - blbs.firstRowOffset - _pageHeaderSize) /
-      blbs.rowSize;
-  if ((offset - blbs.firstRowOffset - _pageHeaderSize) %
-          blbs.rowSize !=
-      0)
+      (offset - blbs.firstRowOffset - _pageHeaderSize) / blbs.rowSize;
+  if ((offset - blbs.firstRowOffset - _pageHeaderSize) % blbs.rowSize != 0)
     NKV_LOG_I(std::cout, "WARN: offset maybe wrong!");
   return std::make_pair(pagePtr, rowOff);
 }
@@ -527,8 +525,62 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
       oldTS, value, value.size());
   return true;
 }
+
 bool PBRB::dropRow(RowAddr rAddr) {
   auto [pagePtr, rowOffset] = findPageAndRowByAddr(rAddr);
-  return pagePtr->clearRowBitMapPage(rowOffset);
+  bool result = pagePtr->clearRowBitMapPage(rowOffset);
+  if (result == true) {
+    BufferListBySchema &blbs = _bufferMap.at(pagePtr->getSchemaIDPage());
+    blbs.curRowNum--;
+    return true;
+  }
+  return false;
 }
+
+bool PBRB::evictRow(IndexerIterator &iter) {
+  RowAddr rAddr = iter->second.getPBRBAddr();
+  if (dropRow(rAddr) == false) return false;
+  iter->second.setIsHot(false);
+  _evictCnt++;
+  return true;
+}
+
+bool PBRB::traverseIdxGC() {
+  // TODO: Select GC Schema
+  std::vector<SchemaId> GCSchemaVec;
+  for (auto &it : *_schemaUMap) {
+    GCSchemaVec.emplace_back(it.first);
+  }
+
+  for (auto &schemaId : GCSchemaVec) {
+    _traverseIdxGCBySchema(schemaId);
+  }
+
+  return true;
+}
+
+bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
+  TimeStamp startTS;
+  startTS.getNow();
+  // TODO: Adjust retention window size
+  TimeStamp watermark = startTS;
+  watermark.moveBackward(
+      getTicksByNanosecs(_retentionWindowSecs * 1000000000ull));
+  NKV_LOG_I(std::cout,
+            "Start to GC schema id: {}, startTS: {}, watermark: {}, "
+            "_retentionWindowSecs: {}s",
+            schemaid, startTS, watermark, _retentionWindowSecs);
+
+  auto &idx = _indexListPtr->at(schemaid);
+  for (auto iter = idx->begin(); iter != idx->end(); iter++) {
+    // Compare with watermark
+    ValuePtr &valuePtr = iter->second;
+    if (valuePtr.isHot() == false || valuePtr.getTimestamp().gt(watermark))
+      continue;
+    evictRow(iter);
+  }
+
+  return true;
+}
+
 }  // namespace NKV

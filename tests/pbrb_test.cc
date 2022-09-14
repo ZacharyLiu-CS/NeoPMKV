@@ -19,7 +19,7 @@ TEST(PBRBTest, Test01) {
   TimeStamp timestamp;
   timestamp.getNow();
   IndexerList indexerList;
-  indexerList.insert({1,std::make_shared<IndexerT>()});
+  indexerList.insert({1, std::make_shared<IndexerT>()});
   auto indexer = indexerList[1];
   uint32_t maxPageNum = 100;
   PBRB pbrb(maxPageNum, &timestamp, &indexerList, &sUMap);
@@ -107,20 +107,9 @@ TEST(SchemaTest, FieldTest) {
   // ASSERT_EQ(schema.size, 8 + 8 + 8 + 128 + 128 + 1024 + 1048576);
 }
 
-TEST(PBRBTest, Test02) {
-  // Create Schema
-  SchemaAllocator schemaAllocator;
-  SchemaUMap sUMap;
-  std::vector<SchemaField> s02Fields{SchemaField(FieldType::INT64T, "pk"),
-                                     SchemaField(FieldType::STRING, "f1", 8),
-                                     SchemaField(FieldType::STRING, "f2", 16)};
-  Schema schema02 = schemaAllocator.createSchema("schema02", 0, s02Fields);
-  sUMap.addSchema(schema02);
-
+bool generateKV(uint32_t length, std::vector<Value> &values,
+                IndexerList &indexerList) {
   // Generate KVs
-  std::vector<Value> values;
-  uint32_t length = 1 << 20;
-  uint32_t maxPageNum = 1 << 15;
 
   Value padding("0000", 4);
   padding.resize(4);
@@ -143,11 +132,12 @@ TEST(PBRBTest, Test02) {
         .append(f1)
         .append(padding)
         .append(f2);
-    ASSERT_EQ(v.size(), 44);
+    // ASSERT_EQ(v.size(), 44);
     values.emplace_back(v);
   }
   generate_value.end();
-  NKV_LOG_I(std::cout, "Genenation Duration: {}", generate_value.duration());
+  NKV_LOG_I(std::cout, "Genenation Duration: {:.2f}",
+            generate_value.duration());
 
   // for (auto v : values) {
   //   uint64_t pk = *(uint64_t *)(v.substr(4, 8).data());
@@ -168,8 +158,7 @@ TEST(PBRBTest, Test02) {
   PointProfiler indexer_timer;
   indexer_timer.start();
   // Create Indexer
-  IndexerList indexerList;
-  indexerList.insert({1,std::make_shared<IndexerT>()});
+  indexerList.insert({1, std::make_shared<IndexerT>()});
   auto indexer = indexerList[1];
   for (auto v : values) {
     uint64_t pk = *(uint64_t *)(v.substr(4, 8).data());
@@ -180,14 +169,32 @@ TEST(PBRBTest, Test02) {
     indexer->insert({pk, vPtr});
   }
   indexer_timer.end();
-  NKV_LOG_I(std::cout, "Indexer Insertion Duration: {}s",
+  NKV_LOG_I(std::cout, "Indexer Insertion Duration: {:.2f}s",
             indexer_timer.duration());
+  return true;
+}
 
+TEST(PBRBTest, Test02) {
+  // Create Schema
+  SchemaAllocator schemaAllocator;
+  SchemaUMap sUMap;
+  std::vector<SchemaField> s02Fields{SchemaField(FieldType::INT64T, "pk"),
+                                     SchemaField(FieldType::STRING, "f1", 8),
+                                     SchemaField(FieldType::STRING, "f2", 16)};
+  Schema schema02 = schemaAllocator.createSchema("schema02", 0, s02Fields);
+  sUMap.addSchema(schema02);
+
+  uint32_t length = 1 << 20;
+  uint32_t maxPageNum = 1 << 15;
+  std::vector<Value> values;
+  IndexerList indexerList;
+  generateKV(length, values, indexerList);
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
   PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap);
 
+  auto &indexer = indexerList[1];
   // Cache all KVs
   for (int i = 0; i < 3; i++) {
     PointProfiler timer;
@@ -221,13 +228,80 @@ TEST(PBRBTest, Test02) {
       }
     }
     timer.end();
-    NKV_LOG_I(std::cout, "Step {}: Duration: {}s", i + 1, timer.duration());
+    NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s", i + 1, timer.duration());
   }
 #ifdef ENABLE_BREAKDOWN
   pbrb.analyzePerf();
 #endif
 }
 
+TEST(PBRBTest, Test03) {
+  // Create Schema
+  SchemaAllocator schemaAllocator;
+  SchemaUMap sUMap;
+  std::vector<SchemaField> s03Fields{SchemaField(FieldType::INT64T, "pk"),
+                                     SchemaField(FieldType::STRING, "f1", 8),
+                                     SchemaField(FieldType::STRING, "f2", 16)};
+  Schema schema03 = schemaAllocator.createSchema("schema02", 0, s03Fields);
+  sUMap.addSchema(schema03);
+
+  uint32_t length = 20;
+  uint32_t maxPageNum = 1 << 10;
+  std::vector<Value> values;
+  IndexerList indexerList;
+  generateKV(length, values, indexerList);
+  // Create PBRB
+  TimeStamp ts_start_pbrb;
+  ts_start_pbrb.getNow();
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 5);
+
+  auto &indexer = indexerList[1];
+  std::vector<uint64_t> seq[] = {
+      {1, 2, 3, 4, 5}, {6, 7, 8, 9, 10}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}};
+  std::vector<uint64_t> sleepTime{3, 3, 3};
+  // Cache 0 ~ 4:
+  for (int i = 0; i < 3; i++) {
+    PointProfiler timer;
+    timer.start();
+    for (auto pk: seq[i]) {
+      Key key(schema03.schemaId, pk);
+      IndexerIterator idxIter = indexer->find(key.primaryKey);
+      if (idxIter != indexer->end()) {
+        ValuePtr *vPtr = &idxIter->second;
+        if (vPtr->isHot()) {
+          // Read PBRB
+          NKV_LOG_I(std::cout, "[pk = {:4}] : [hit]", pk);
+          pbrb.schemaHit(schema03.schemaId);
+          TimeStamp tsRead;
+          tsRead.getNow();
+          Value read_result;
+          bool status =
+              pbrb.read(vPtr->getTimestamp(), tsRead, vPtr->getPBRBAddr(),
+                        key.schemaId, read_result, vPtr);
+          ASSERT_EQ(status, true);
+          ASSERT_EQ(read_result, values[pk - 1]);
+        } else {
+          // Read PLog get a value
+          pbrb.schemaMiss(schema03.schemaId);
+          NKV_LOG_I(std::cout, "[pk = {:4}] : [miss]", pk);
+          TimeStamp tsInsert;
+          tsInsert.getNow();
+          bool status = pbrb.syncwrite(vPtr->getTimestamp(), tsInsert,
+                                       key.schemaId, values[pk - 1], idxIter);
+          ASSERT_EQ(status, true);
+          ASSERT_EQ(vPtr->isHot(), true);
+        }
+      }
+    }
+    sleep(sleepTime[i]);
+    timer.end();
+    NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s (Sleeped {}s)", i + 1, timer.duration(), sleepTime[i]);
+    pbrb.traverseIdxGC();
+  }
+#ifdef ENABLE_BREAKDOWN
+  pbrb.analyzePerf();
+#endif
+}
 
 }  // namespace NKV
 int main(int argc, char **argv) {

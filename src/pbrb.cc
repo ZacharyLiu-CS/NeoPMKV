@@ -10,7 +10,8 @@
 
 namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-           SchemaUMap *umap, uint64_t retentionWindowSecs, uint32_t maxPageSearchNum) {
+           SchemaUMap *umap, uint64_t retentionWindowSecs,
+           uint32_t maxPageSearchNum) {
   // check headerSizes
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
   static_assert(ROW_HEADER_SIZE == 28, "ROW_HEADER_SIZE != 28");
@@ -320,24 +321,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
   auto &blbs = bmIter->second;
   // Search in neighboring keys
   uint32_t maxIdxSearchNum = 3;
-  IndexerIterator prevIter = iter;
   IndexerIterator nextIter = iter;
-
-  BufferPage *prevPagePtr = nullptr;
-  RowOffset prevOff = UINT32_MAX;
-  for (int i = 0; i < maxIdxSearchNum; i++) {
-    if (prevIter != _indexListPtr->at(schemaID)->begin()) {
-      prevIter--;
-      auto valuePtr = &prevIter->second;
-      if (valuePtr->isHot()) {
-        RowAddr rowAddr = valuePtr->getPBRBAddr();
-        auto retVal = findPageAndRowByAddr(rowAddr);
-        prevPagePtr = retVal.first;
-        prevOff = retVal.second;
-      }
-    } else
-      break;
-  }
 
   BufferPage *nextPagePtr = nullptr;
   RowOffset nextOff = UINT32_MAX;
@@ -360,76 +344,19 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
   searchingIdxNss.emplace_back(idxTimer.duration() * 1000000000);
 #endif
   std::pair<BufferPage *, RowOffset> result = std::make_pair(nullptr, 0);
-  // Case 1: nullptr <- key -> nullptr
-  if (prevPagePtr == nullptr && nextPagePtr == nullptr) {
+  // Case 1: key -> nullptr
+  if (nextPagePtr == nullptr) {
     result = traverseFindEmptyRow(schemaID);
   }
-  // Case 2.1: prevPagePtr <- key -> nullptr findEmptySlotInPage(maxRowCnt,
-  // prevPagePtr, beginOffset, UINT32_MAX);
-  else if (prevPagePtr != nullptr && nextPagePtr == nullptr) {
-    RowOffset rowOff = findEmptySlotInPage(blbs, prevPagePtr, prevOff);
-    if (rowOff == UINT32_MAX)
-      result = traverseFindEmptyRow(schemaID, prevPagePtr->getNextPage());
-    else
-      result = std::make_pair(prevPagePtr, rowOff);
-  }
-  // Case 2.2: nullptr <- key -> nextPagePtr findEmptySlotInPage(maxRowCnt,
+  // Case 2: key -> nextPagePtr findEmptySlotInPage(maxRowCnt,
   // nextPagePtr, 0, endOffset);
 
-  else if (prevPagePtr == nullptr && nextPagePtr != nullptr) {
-    RowOffset rowOff = findEmptySlotInPage(blbs, nextPagePtr, prevOff);
+  else if (nextPagePtr != nullptr) {
+    RowOffset rowOff = findEmptySlotInPage(blbs, nextPagePtr, nextOff);
     if (rowOff == UINT32_MAX)
       result = traverseFindEmptyRow(schemaID, nextPagePtr->getNextPage());
     else
       result = std::make_pair(nextPagePtr, rowOff);
-  }
-
-  // Case 3: prevPagePtr <- key -> nextPagePtr
-  else {
-    // Case 3.1: Same Page:  findEmptySlotInPage(maxRowCnt, prevPagePtr,
-    // beginOffset, endOffset);
-    if (prevPagePtr == nextPagePtr) {
-      RowOffset beginOff = 0, endOff = UINT32_MAX;
-      if (prevOff < nextOff) {
-        beginOff = prevOff;
-        endOff = nextOff;
-      }
-
-      else {
-        beginOff = nextOff;
-        endOff = prevOff;
-      }
-      RowOffset rowOff =
-          findEmptySlotInPage(blbs, prevPagePtr, beginOff, endOff);
-      if (rowOff == UINT32_MAX)
-        result = traverseFindEmptyRow(schemaID, prevPagePtr->getNextPage());
-      else
-        result = std::make_pair(prevPagePtr, rowOff);
-    }
-    // Case 3.2: Diff Page:  findEmptySlotInPage(maxRowCnt,
-    // lowerPtr);
-    else {
-      uint32_t prevHotNum = prevPagePtr->getHotRowsNumPage();
-      uint32_t nextHotNum = nextPagePtr->getHotRowsNumPage();
-
-      // Case 3.2.1
-      if (prevHotNum <= nextHotNum) {
-        RowOffset rowOff = findEmptySlotInPage(blbs, prevPagePtr);
-        if (rowOff == UINT32_MAX)
-          result = traverseFindEmptyRow(schemaID, prevPagePtr->getNextPage());
-        else
-          result = std::make_pair(prevPagePtr, rowOff);
-      }
-
-      // Case 3.2.2
-      else {
-        RowOffset rowOff = findEmptySlotInPage(blbs, nextPagePtr);
-        if (rowOff == UINT32_MAX)
-          result = traverseFindEmptyRow(schemaID, nextPagePtr->getNextPage());
-        else
-          result = std::make_pair(nextPagePtr, rowOff);
-      }
-    }
   }
 
   NKV_LOG_D(std::cout, "Return a slot: pagePtr: {}, offset: {}",

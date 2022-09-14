@@ -78,7 +78,7 @@ class ValuePtr {
  private:
   std::mutex *updateLock_ = nullptr;
   TimeStamp _timestamp;
-  union Addr {
+  struct Addr {
     PmemAddress pmemAddr;
     RowAddr pbrbAddr;
   } _addr;
@@ -92,6 +92,8 @@ class ValuePtr {
   RowAddr getPBRBAddr() { return _addr.pbrbAddr; }
 
   bool isHot() { return _isHot; }
+
+  void setIsHot(bool isHot) { _isHot = isHot; }
 
   void updateTS() { this->_timestamp.getNow(); }
   void updateTS(TimeStamp newTS) { this->_timestamp = newTS; }
@@ -256,6 +258,9 @@ class SchemaUMap {
     auto it = _umap.find(schemaId);
     return it == _umap.end() ? nullptr : &(it->second);
   }
+
+  decltype(_umap.begin()) begin() { return _umap.begin(); }
+  decltype(_umap.end()) end() {return _umap.end(); }
 };
 
 }  // namespace NKV

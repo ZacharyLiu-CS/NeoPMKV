@@ -48,8 +48,8 @@ using IndexerIterator = IndexerT::iterator;
 class PBRB {
  public:
   // constructor
-  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr, SchemaUMap *umap,
-       uint32_t maxPageSearchNum = 5);
+  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
+       SchemaUMap *umap, uint64_t retentionWindowSecs = 60, uint32_t maxPageSearchNum = 5);
   // dtor
   ~PBRB();
 
@@ -88,16 +88,17 @@ class PBRB {
   // corresponds to a list
   std::map<SchemaId, std::list<BufferPage *>> _usedPageMap;
 
-  IndexerList * _indexListPtr;
+  IndexerList *_indexListPtr;
 
   uint32_t _splitCnt = 0;
   uint32_t _evictCnt = 0;
-
   SchemaUMap *_schemaUMap;
 
   friend class BufferListBySchema;
   std::map<SchemaId, BufferListBySchema> _bufferMap;
   TimeStamp _watermark;
+
+  uint64_t _retentionWindowSecs = 60;  // 1 minute
 
   BufferPage *getPageAddr(void *rowAddr);
 
@@ -153,7 +154,7 @@ class PBRB {
   std::pair<BufferPage *, RowOffset> findPageAndRowByAddr(void *rowAddr);
   RowAddr getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff);
   // evict row and return cold addr.
-  PmemAddress evictRow(void *rowAddr);
+  bool evictRow(IndexerIterator &iter);
 
   // mark the row as unoccupied when evicting a hot row
   void removeHotRow(BufferPage *pagePtr, RowOffset offset);
@@ -236,6 +237,13 @@ class PBRB {
  private:
   std::mutex writeLock_;
 
+  // GC
+ private:
+  bool _traverseIdxGCBySchema(SchemaId schemaid);
+
+ public:
+  bool traverseIdxGC();
+
  public:
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
             SchemaId schemaid, Value &value, ValuePtr *vPtr);
@@ -244,7 +252,6 @@ class PBRB {
   bool asyncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
                   const Value &value, IndexerIterator iter);
   bool dropRow(RowAddr rAddr);
-
   // GTEST
   FRIEND_TEST(PBRBTest, Test01);
 };

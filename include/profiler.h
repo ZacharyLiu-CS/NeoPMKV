@@ -30,6 +30,10 @@
 
 #define TSC_KHz 2095078ull
 
+inline uint64_t getTicksByNanosecs(uint64_t nanoseconds) {
+  return (uint64_t) ((double) nanoseconds) * TSC_KHz / 1000000;
+}
+
 inline uint64_t rte_rdtsc() {
   union {
     uint64_t tsc_64;

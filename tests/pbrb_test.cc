@@ -6,6 +6,7 @@
 #include "gtest/gtest.h"
 #include "pbrb.h"
 #include "pmem_engine.h"
+#include "profiler.h"
 
 namespace NKV {
 TEST(PBRBTest, Test01) {
@@ -137,7 +138,7 @@ bool generateKV(uint32_t length, std::vector<Value> &values,
   }
   generate_value.end();
   NKV_LOG_I(std::cout, "Genenation Duration: {:.2f}",
-            generate_value.duration());
+            generate_value.duration() / (double) NANOSEC_BASE);
 
   // for (auto v : values) {
   //   uint64_t pk = *(uint64_t *)(v.substr(4, 8).data());
@@ -170,7 +171,7 @@ bool generateKV(uint32_t length, std::vector<Value> &values,
   }
   indexer_timer.end();
   NKV_LOG_I(std::cout, "Indexer Insertion Duration: {:.2f}s",
-            indexer_timer.duration());
+            indexer_timer.duration() / (double) NANOSEC_BASE);
   return true;
 }
 
@@ -228,7 +229,8 @@ TEST(PBRBTest, Test02) {
       }
     }
     timer.end();
-    NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s", i + 1, timer.duration());
+    NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s", i + 1,
+              timer.duration() / (double) NANOSEC_BASE);
   }
 #ifdef ENABLE_BREAKDOWN
   pbrb.analyzePerf();
@@ -263,7 +265,7 @@ TEST(PBRBTest, Test03) {
   for (int i = 0; i < 3; i++) {
     PointProfiler timer;
     timer.start();
-    for (auto pk: seq[i]) {
+    for (auto pk : seq[i]) {
       Key key(schema03.schemaId, pk);
       IndexerIterator idxIter = indexer->find(key.primaryKey);
       if (idxIter != indexer->end()) {
@@ -295,7 +297,8 @@ TEST(PBRBTest, Test03) {
     }
     sleep(sleepTime[i]);
     timer.end();
-    NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s (Sleeped {}s)", i + 1, timer.duration(), sleepTime[i]);
+    NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s (Sleeped {}s)", i + 1,
+              timer.duration() / (double) NANOSEC_BASE, sleepTime[i]);
     pbrb.traverseIdxGC();
   }
 #ifdef ENABLE_BREAKDOWN

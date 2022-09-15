@@ -12,6 +12,7 @@
 #include "buffer_page.h"
 #include "logging.h"
 #include "pbrb.h"
+#include "profiler.h"
 #include "schema.h"
 
 namespace NKV {
@@ -30,14 +31,15 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     TimeStamp tsRead;
     tsRead.getNow();
 #ifdef ENABLE_STATISTICS
+    PointProfiler _timer;
     _timer.start();
 #endif
     bool status = _pbrb->read(vPtr.getTimestamp(), tsRead, vPtr.getPBRBAddr(),
                               schemaid, value, &vPtr);
 #ifdef ENABLE_STATISTICS
     _timer.end();
-    _durationStat.pbrbReadCount++;
-    _durationStat.pbrbReadTimeSecs += _timer.duration();
+    _durationStat.pbrbReadCount.fetch_add(1);
+    _durationStat.pbrbReadTimeNanoSecs.fetch_add(_timer.duration());
 #endif
 
   } else {
@@ -45,17 +47,22 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     // Read PLog get a value
 
 #ifdef ENABLE_STATISTICS
+    PointProfiler _timer;
     _timer.start();
 #endif
     _engine_ptr->read(vPtr.getPmemAddr(), value);
 #ifdef ENABLE_STATISTICS
     _timer.end();
-    _durationStat.pmemReadCount++;
-    _durationStat.pmemReadTimeSecs += _timer.duration();
+    _durationStat.pmemReadCount.fetch_add(1);
+    _durationStat.pmemReadTimeNanoSecs.fetch_add(_timer.duration());
 #endif
     if (_enable_pbrb == false) {
       return true;
     }
+#ifdef ENABLE_STATISTICS
+    _timer.start();
+#endif
+
     TimeStamp tsInsert;
     tsInsert.getNow();
     _pbrb->schemaMiss(schemaid);
@@ -63,6 +70,11 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
       bool status = _pbrb->syncwrite(vPtr.getTimestamp(), tsInsert, schemaid,
                                      value, idxIter);
     }
+#ifdef ENABLE_STATISTICS
+    _timer.end();
+    _durationStat.pbrbWriteCount.fetch_add(1);
+    _durationStat.pbrbWriteTimeNanoSecs.fetch_add(_timer.duration());
+#endif
   }
   return true;
 }
@@ -83,13 +95,27 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
   auto indexer = _indexerList[key.schemaId];
 
   PmemAddress pmAddr;
+
+#ifdef ENABLE_STATISTICS
+  PointProfiler _timer;
+  _timer.start();
+#endif
   Status s = _engine_ptr->append(pmAddr, value.c_str(), value.size());
+
+#ifdef ENABLE_STATISTICS
+  _timer.end();
+  _durationStat.pmemWriteCount.fetch_add(1);
+  _durationStat.pmemWriteTimeNanoSecs.fetch_add(_timer.duration());
+#endif
+
   if (!s.is2xxOK()) return false;
   ValuePtr vPtr;
   vPtr.updatePmemAddr(pmAddr);
   // try to insert
   auto [iter, status] = indexer->insert({key.primaryKey, vPtr});
+  // status is true means insert success, we don't have the kv before
   if (status == true) return true;
+  // status is false means having the old kv
   if (_enable_pbrb == true && iter->second.isHot() == true) {
     _pbrb->dropRow(iter->second.getPBRBAddr());
   }

@@ -28,12 +28,15 @@
 #define HAS_HW_RDTSC 0
 #endif
 
-#define TSC_KHz 2095078ull
+#define TSC_Hz (2095078ull * 1000)
+#define NANOSEC_BASE 1000000000
 
 inline uint64_t getTicksByNanosecs(uint64_t nanoseconds) {
-  return (uint64_t) ((double) nanoseconds) * TSC_KHz / 1000000;
+  return ((uint64_t) (nanoseconds) * TSC_Hz) / NANOSEC_BASE;
 }
-
+inline uint64_t getNanoSecsByTicks(uint64_t ticks) {
+  return ((uint64_t) (ticks) *1000000000) / NANOSEC_BASE;
+}
 inline uint64_t rte_rdtsc() {
   union {
     uint64_t tsc_64;
@@ -85,20 +88,20 @@ class PointProfiler {
  public:
   inline PointProfiler() {}
   ~PointProfiler() {}
-  static double now(){return rte_rdtsc();}
+  static uint64_t now(){return rte_rdtsc();}
 
   inline void start() { start_tick_ = rte_rdtsc(); }
-  inline double end() {
+  // return nano seconds
+  inline uint64_t end() {
     uint64_t end_tick = rte_rdtsc();
-    return duration_ = static_cast<double>(end_tick - start_tick_) /
-           static_cast<double>(TSC_KHz) / 1000ull;
+    return duration_ = getNanoSecsByTicks(end_tick - start_tick_);
   }
 
-  inline double duration(){
+  inline uint64_t duration(){
     return duration_;
   }
 
  private:
   uint64_t start_tick_ = 0;
-  double duration_ = 0;
+  uint64_t duration_ = 0;
 };

@@ -103,7 +103,7 @@ bool NeoPMKV::update(Key &key,
   }
   auto indexer = _indexerList[key.schemaId];
   IndexerIterator idxIter = indexer->find(key.primaryKey);
-  if (idxIter != indexer->end()) return false;
+  if (idxIter == indexer->end()) return false;
   ValuePtr &vPtr = idxIter->second;
   PmemAddress pmemAddr = vPtr.getPmemAddr();
 
@@ -148,7 +148,7 @@ bool NeoPMKV::remove(Key &key) {
   if (isHot) {
     _pbrb->dropRow(idxIter->second.getPBRBAddr());
   }
-  indexer->erase(idxIter);
+  indexer->unsafe_erase(idxIter);
   return true;
 }
 bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,

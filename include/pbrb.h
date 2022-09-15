@@ -23,6 +23,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <oneapi/tbb/concurrent_map.h>
 
 // header of this project
 #include "buffer_list.h"
@@ -41,7 +42,7 @@ const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = std::map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerT = oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
 using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
 using IndexerIterator = IndexerT::iterator;
 

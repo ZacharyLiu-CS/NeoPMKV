@@ -32,6 +32,7 @@ endif(STATISTICS)
 # pkg_check_modules(LIBPMEMKV REQUIRED libpmemkv)
 # pkg_check_modules(LIBPMEMOBJ REQUIRED libpmemobj)
 find_package (fmt REQUIRED)
+find_package (TBB REQUIRED)
 
 # enable test
 option(BUILD_TESTS "Build test programs" ON)
@@ -58,6 +59,7 @@ target_link_libraries(example
   pthread
   pmem
   fmt::fmt
+  TBB::tbb
   )
 
 #8. define the static library
@@ -66,6 +68,7 @@ target_link_libraries( ${PROJECT_NAME}
   pthread
   pmem
   fmt::fmt
+  TBB::tbb
   )
 #9. define the install path
 set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/neopmkv)
@@ -95,6 +98,7 @@ if(BUILD_TESTS)
         pmem
         gtest
         fmt::fmt
+        TBB::tbb
         )
       add_test(NAME ${testname} COMMAND ${testname})
     ENDFOREACH(testsourcefile ${TEST_FILE})

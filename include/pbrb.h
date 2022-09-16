@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <bitset>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -49,7 +50,8 @@ class PBRB {
  public:
   // constructor
   PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-       SchemaUMap *umap, uint64_t retentionWindowSecs = 60, uint32_t maxPageSearchNum = 5);
+       SchemaUMap *umap, uint64_t retentionWindowSecs = 60,
+       uint32_t maxPageSearchNum = 5, double targetOccupancyRatio = 0.7);
   // dtor
   ~PBRB();
 
@@ -98,7 +100,9 @@ class PBRB {
   std::map<SchemaId, BufferListBySchema> _bufferMap;
   TimeStamp _watermark;
 
+  int32_t GCFailedTimes = 0;
   uint64_t _retentionWindowSecs = 60;  // 1 minute
+  double targetOccupancyRatio = 0.7;
 
   BufferPage *getPageAddr(void *rowAddr);
 
@@ -204,6 +208,33 @@ class PBRB {
   struct AccessStatistics {
     uint64_t accessCount = 0;
     uint64_t hitCount = 0;
+    uint64_t lastHitCount = 0;
+    std::vector<uint64_t> hitVec{0};
+    uint64_t interval = 200000;
+
+    inline bool updateVec() {
+      if (accessCount % interval == 0) {
+        hitVec.emplace_back(hitCount - lastHitCount);
+        lastHitCount = hitCount;
+        return true;
+      }
+      return false;
+    }
+    inline bool hit() {
+      accessCount++;
+      hitCount++;
+      return updateVec();
+    }
+    inline bool miss() {
+      accessCount++;
+      return updateVec();
+    }
+    inline double getHitRatio() {
+      if (accessCount > 0)
+        return (double)hitCount / accessCount;
+      else
+        return 2;
+    }
   };
 
   std::unordered_map<SchemaId, AccessStatistics> _AccStatBySchema;
@@ -211,13 +242,12 @@ class PBRB {
  public:
   bool schemaHit(SchemaId sid) {
     auto &accStat = _AccStatBySchema[sid];
-    accStat.accessCount++;
-    accStat.hitCount++;
+    if (accStat.hit()) traverseIdxGC();
     return true;
   }
   bool schemaMiss(SchemaId sid) {
     auto &accStat = _AccStatBySchema[sid];
-    accStat.accessCount++;
+    if (accStat.miss()) traverseIdxGC();
     return true;
   }
   double getHitRatio(SchemaId sid) {
@@ -228,9 +258,21 @@ class PBRB {
 
   void outputHitRatios() {
     for (auto &it : _AccStatBySchema) {
-      NKV_LOG_I(std::cout, "SchemaId: {}, Hit Ratio: {} / {} = {:.2f}",
+      auto &hitVec = it.second.hitVec;
+      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratio: {} / {} = {:.2f}",
                 it.first, it.second.hitCount, it.second.accessCount,
                 (double)it.second.hitCount / it.second.accessCount);
+      std::string hitStr, ratioStr;
+      std::for_each(hitVec.begin(), hitVec.end(), [&](uint64_t x) {
+        fmt::format_to(std::back_inserter(hitStr), "{:8d} ", x);
+        fmt::format_to(std::back_inserter(ratioStr), "{:8.3f} ",
+                       (double)x / it.second.interval);
+      });
+
+      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
+                it.first, it.second.interval, hitStr);
+      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
+                it.first, it.second.interval, ratioStr);
     }
   }
 
@@ -240,6 +282,11 @@ class PBRB {
   // GC
  private:
   bool _traverseIdxGCBySchema(SchemaId schemaid);
+  bool _reclaimEmptyPages(SchemaId schemaid);
+  inline bool _checkOccupancyRatio();
+  inline double _getOccupancyRatio() {
+    return 1 - ((double)_freePageList.size() / _maxPageNumber);
+  }
 
  public:
   bool traverseIdxGC();
@@ -253,6 +300,8 @@ class PBRB {
                   const Value &value, IndexerIterator iter);
   bool dropRow(RowAddr rAddr);
   // GTEST
+
+  friend class BufferListBySchema;
   FRIEND_TEST(PBRBTest, Test01);
 };
 

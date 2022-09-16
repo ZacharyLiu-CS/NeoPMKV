@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <list>
 #include "buffer_page.h"
 #include "schema.h"
 
@@ -34,6 +35,16 @@ class BufferListBySchema {
   BufferPage *tailPage = nullptr;
 
  public:
+  // return occupancy Ratio
+  double getOccupancyRatio() {
+    if (curRowNum != 0) {
+      NKV_LOG_I(std::cout, "curRowNum: {}, maxRowNum: {}", curRowNum,
+                curPageNum * maxRowCnt);
+      return ((double)curRowNum) / (curPageNum * maxRowCnt);
+    } else
+      return 0;
+  }
+
   BufferPage *getHeadPage() { return headPage; }
 
   BufferListBySchema() {}
@@ -49,7 +60,8 @@ class BufferListBySchema {
   void setOccuBitmapSize(uint32_t pageSize);
   void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize,
                uint32_t rowHeaderSize);
-
+  bool reclaimPage(std::list<BufferPage *> &freePageList, BufferPage *pagePtr);
+  uint64_t reclaimEmptyPages(std::list<BufferPage *> &freePageList);
   friend class PBRB;
 };  // end of struct BufferListBySchema
 }  // end of namespace NKV

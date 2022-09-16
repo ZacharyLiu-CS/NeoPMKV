@@ -39,4 +39,49 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
   setOccuBitmapSize(pageSize);
   maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
 }
+
+bool BufferListBySchema::reclaimPage(std::list<BufferPage *> &freePageList,
+                                     BufferPage *pagePtr) {
+  // Case 1: head page
+  if (pagePtr == headPage) {
+    curPageNum--;
+    headPage = pagePtr->getNextPage();
+
+    // special: only 1 page now
+    if (headPage == nullptr) {
+      assert(curPageNum == 0);
+      tailPage = nullptr;
+      freePageList.emplace_back(pagePtr);
+      return true;
+    }
+    headPage->setPrevPage(nullptr);
+  } else if (pagePtr == tailPage) {
+    curPageNum--;
+    tailPage = pagePtr->getPrevPage();
+    tailPage->setNextPage(nullptr);
+  } else {
+    curPageNum--;
+    BufferPage *prevPtr = pagePtr->getPrevPage();
+    BufferPage *nextPtr = pagePtr->getNextPage();
+    prevPtr->setNextPage(nextPtr);
+    nextPtr->setPrevPage(prevPtr);
+  }
+  freePageList.emplace_back(pagePtr);
+  return true;
+}
+
+uint64_t BufferListBySchema::reclaimEmptyPages(
+    std::list<BufferPage *> &freePageList) {
+  if (curPageNum == 0) return 0;
+  uint64_t reclaimedPageNum = 0;
+
+  // Traverse linked list
+  BufferPage *nextPage = nullptr;
+  for (BufferPage *pagePtr = headPage; pagePtr != nullptr; pagePtr = nextPage) {
+    nextPage = pagePtr->getNextPage();
+    if (pagePtr->getHotRowsNumPage() == 0) continue;
+    if (reclaimPage(freePageList, pagePtr)) reclaimedPageNum++;
+  }
+  return reclaimedPageNum;
+}
 }  // end of namespace NKV

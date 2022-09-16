@@ -185,14 +185,14 @@ TEST(PBRBTest, Test02) {
   sUMap.addSchema(schema02);
 
   uint32_t length = 1 << 20;
-  uint32_t maxPageNum = 1 << 15;
+  uint32_t maxPageNum = 1 << 14;
   std::vector<Value> values;
   IndexerList indexerList;
   generateKV(length, values, indexerList);
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
-  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap);
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60);
 
   auto &indexer = indexerList[1];
   // Cache all KVs

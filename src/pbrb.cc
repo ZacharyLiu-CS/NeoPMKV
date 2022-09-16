@@ -11,7 +11,7 @@
 namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
            SchemaUMap *umap, uint64_t retentionWindowSecs,
-           uint32_t maxPageSearchNum) {
+           uint32_t maxPageSearchNum, double targetOccupancyRatio) {
   // check headerSizes
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
   static_assert(ROW_HEADER_SIZE == 28, "ROW_HEADER_SIZE != 28");
@@ -73,6 +73,7 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   pagePtr->setSchemaIDPage(schemaId);
   pagePtr->setSchemaVerPage(schemaVer);
 
+  blbs.curPageNum++;
   _freePageList.pop_front();
   _AccStatBySchema.insert({schemaId, AccessStatistics()});
 
@@ -459,6 +460,8 @@ bool PBRB::dropRow(RowAddr rAddr) {
   if (result == true) {
     BufferListBySchema &blbs = _bufferMap.at(pagePtr->getSchemaIDPage());
     blbs.curRowNum--;
+    if (pagePtr->getHotRowsNumPage() == 0)
+      blbs.reclaimPage(_freePageList, pagePtr);
     return true;
   }
   return false;
@@ -475,39 +478,88 @@ bool PBRB::evictRow(IndexerIterator &iter) {
 bool PBRB::traverseIdxGC() {
   // TODO: Select GC Schema
   std::vector<SchemaId> GCSchemaVec;
+  double freePageRatio = (double)getFreePageList().size() / getMaxPageNumber();
+
+  NKV_LOG_I(std::cout,
+            "Current number of free pages / max page number : ({} / {} = {})",
+            getFreePageList().size(), getMaxPageNumber(), freePageRatio);
+  if (freePageRatio >= 1 - targetOccupancyRatio) {
+    return true;
+  }
+
   for (auto &it : *_schemaUMap) {
-    GCSchemaVec.emplace_back(it.first);
+    auto bMapIter = _bufferMap.find(it.first);
+    if (bMapIter != _bufferMap.end() && bMapIter->second.curRowNum != 0)
+      GCSchemaVec.emplace_back(it.first);
   }
 
+  std::sort(GCSchemaVec.begin(), GCSchemaVec.end(),
+            [&](const SchemaId &a, const SchemaId &b) -> bool {
+              return this->_AccStatBySchema[a].getHitRatio() <
+                     this->_AccStatBySchema[b].getHitRatio();
+            });
+
+  bool achieved = true;
   for (auto &schemaId : GCSchemaVec) {
-    _traverseIdxGCBySchema(schemaId);
+    if (_traverseIdxGCBySchema(schemaId)) {
+      achieved = true;
+      break;
+    }
   }
-
+  NKV_LOG_I(std::cout, "After GC: Occupancy Ratio: {}", _getOccupancyRatio());
   return true;
+}
+
+bool PBRB::_checkOccupancyRatio() {
+  return _getOccupancyRatio() < targetOccupancyRatio;
 }
 
 bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
   TimeStamp startTS;
   startTS.getNow();
-  // TODO: Adjust retention window size
+  // Adjust retention window size
   TimeStamp watermark = startTS;
-  watermark.moveBackward(
-      getTicksByNanosecs(_retentionWindowSecs * 1000000000ull));
+  double occupancyRatio = _bufferMap.at(schemaid).getOccupancyRatio();
+  if (occupancyRatio == 0) return false;
+  double moveNanoSecs = (double)_retentionWindowSecs * 1000000000.0 *
+                        exp2(-GCFailedTimes) * (1 - occupancyRatio) / (1 - 0.7);
+  watermark.moveBackward(getTicksByNanosecs(moveNanoSecs));
   NKV_LOG_I(std::cout,
             "Start to GC schema id: {}, startTS: {}, watermark: {}, "
             "_retentionWindowSecs: {}s",
             schemaid, startTS, watermark, _retentionWindowSecs);
+  NKV_LOG_I(std::cout, "Occupancy Ratio: {:.4f}, real moved nanoSecs:{:.0f}",
+            occupancyRatio, moveNanoSecs);
 
+  // Traversal
+  uint64_t evictCnt = 0;
   auto &idx = _indexListPtr->at(schemaid);
+  bool achieveTarget = false;
   for (auto iter = idx->begin(); iter != idx->end(); iter++) {
     // Compare with watermark
     ValuePtr &valuePtr = iter->second;
     if (valuePtr.isHot() == false || valuePtr.getTimestamp().gt(watermark))
       continue;
-    evictRow(iter);
+    if (evictRow(iter)) {
+      evictCnt++;
+      if (_checkOccupancyRatio()) {
+        achieveTarget = true;
+        break;
+      }
+    }
   }
 
-  return true;
+  // GC Failed Times
+  if (achieveTarget) {
+    GCFailedTimes = 0;
+  } else
+    GCFailedTimes++;
+  // auto reclaimed = _bufferMap.at(schemaid).reclaimEmptyPages(_freePageList);
+  NKV_LOG_I(
+      std::cout,
+      "End GC for schema id: {}, evicted: {} rows, occupancy ratio: {:.6f}",
+      schemaid, evictCnt, _bufferMap.at(schemaid).getOccupancyRatio());
+  return achieveTarget;
 }
 
 }  // namespace NKV

@@ -1,6 +1,6 @@
 //
 //  profiler.h
-//  PROJECT profiler.h 
+//  PROJECT profiler.h
 //
 //  Created by zhenliu on 18/05/2022.
 //  Copyright (c) 2022 zhenliu <liuzhenm@mail.ustc.edu.cn>.
@@ -31,11 +31,18 @@
 #define TSC_Hz (2095078ull * 1000)
 #define NANOSEC_BASE 1000000000
 
+#define PERCISION (1ull << 20)
+
+constexpr uint64_t tsc_percision = TSC_Hz/PERCISION;
+constexpr uint64_t nano_percision = NANOSEC_BASE / PERCISION;
+
 inline uint64_t getTicksByNanosecs(uint64_t nanoseconds) {
-  return ((uint64_t) (nanoseconds) * TSC_Hz) / NANOSEC_BASE;
+  return ((uint64_t)(nanoseconds) * (tsc_percision)) /
+         (nano_percision);
 }
 inline uint64_t getNanoSecsByTicks(uint64_t ticks) {
-  return ((uint64_t) (ticks) *1000000000) / NANOSEC_BASE;
+  return ((uint64_t)(ticks) * (nano_percision)) /
+         (tsc_percision);
 }
 inline uint64_t rte_rdtsc() {
   union {
@@ -45,9 +52,7 @@ inline uint64_t rte_rdtsc() {
       uint32_t hi_32;
     };
   } tsc;
-  asm volatile("rdtsc":
-      "=a"(tsc.lo_32),
-      "=d"(tsc.hi_32));
+  asm volatile("rdtsc" : "=a"(tsc.lo_32), "=d"(tsc.hi_32));
   return tsc.tsc_64;
 }
 
@@ -88,7 +93,7 @@ class PointProfiler {
  public:
   inline PointProfiler() {}
   ~PointProfiler() {}
-  static uint64_t now(){return rte_rdtsc();}
+  static uint64_t now() { return rte_rdtsc(); }
 
   inline void start() { start_tick_ = rte_rdtsc(); }
   // return nano seconds
@@ -97,9 +102,7 @@ class PointProfiler {
     return duration_ = getNanoSecsByTicks(end_tick - start_tick_);
   }
 
-  inline uint64_t duration(){
-    return duration_;
-  }
+  inline uint64_t duration() { return duration_; }
 
  private:
   uint64_t start_tick_ = 0;

@@ -248,7 +248,7 @@ inline RowOffset PBRB::findEmptySlotInPage(BufferListBySchema &blbs,
 
 #ifdef ENABLE_BREAKDOWN
   timer.end();
-  findSlotNss.emplace_back(timer.duration() * 1000000000);
+  findSlotNss.emplace_back(timer.duration());
 #endif
 
   return result;
@@ -342,7 +342,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 
 #ifdef ENABLE_BREAKDOWN
   idxTimer.end();
-  searchingIdxNss.emplace_back(idxTimer.duration() * 1000000000);
+  searchingIdxNss.emplace_back(idxTimer.duration());
 #endif
   std::pair<BufferPage *, RowOffset> result = std::make_pair(nullptr, 0);
   // Case 1: key -> nullptr
@@ -365,7 +365,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 
 #ifdef ENABLE_BREAKDOWN
   fcrpTimer.end();
-  fcrpNss.emplace_back(fcrpTimer.duration() * 1000000000);
+  fcrpNss.emplace_back(fcrpTimer.duration());
 #endif
 
   return result;

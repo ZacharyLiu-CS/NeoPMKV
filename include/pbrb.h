@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <oneapi/tbb/concurrent_map.h>
 #include <algorithm>
 #include <bitset>
 #include <cassert>
@@ -23,7 +24,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-#include <oneapi/tbb/concurrent_map.h>
 
 // header of this project
 #include "buffer_list.h"
@@ -39,18 +39,87 @@ namespace NKV {
 const uint32_t rowCRC32Offset = 0;
 const uint32_t rowTSOffset = sizeof(CRC32);
 const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
+const uint32_t pbrbAsyncQueueSize = 16;
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerT =
+    oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
 using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
 using IndexerIterator = IndexerT::iterator;
+
+struct AsyncBufferEntry {
+  uint32_t _entry_size = 0;
+  TimeStamp _oldTS;
+  TimeStamp _newTS;
+  IndexerIterator _iter;
+  Value _entry_content;
+
+  AsyncBufferEntry(uint32_t entry_size) : _entry_size(entry_size) {
+    _entry_content.resize(_entry_size);
+  }
+  inline void copyContent(TimeStamp oldTS, TimeStamp newTS,
+                          IndexerIterator iter, const Value &src) {
+    assert(_entry_size == src.size());
+    _oldTS = oldTS;
+    _newTS = newTS;
+    _iter = iter;
+    memcpy((char *)_entry_content.data(), src.c_str(), _entry_size);
+  }
+};
+
+class AsyncBufferQueue {
+ private:
+  uint32_t _schema_id = 0;
+  uint32_t _schema_size = 0;
+  uint32_t _queue_size = 0;
+
+  std::vector<std::shared_ptr<AsyncBufferEntry>> _queue_contents;
+  // control the queue push and pop function
+  std::atomic_uint32_t _enqueue_head{0};
+  std::atomic_uint32_t _dequeue_tail{0};
+
+ public:
+  AsyncBufferQueue(uint32_t schema_id, uint32_t schema_size,
+                   uint32_t queue_size)
+      : _schema_id(schema_id),
+        _schema_size(schema_size),
+        _queue_size(queue_size) {
+    _queue_contents.resize(queue_size);
+    for (auto i = 0; i < queue_size; i++) {
+      _queue_contents[i] = std::make_shared<AsyncBufferEntry>(schema_size);
+    }
+  }
+
+  bool EnqueueOneEntry(TimeStamp oldTS, TimeStamp newTS, IndexerIterator iter,
+                       const Value &value) {
+    uint32_t allocated_offset = _enqueue_head.fetch_add(1);
+    if (allocated_offset < _dequeue_tail.load() + _queue_size) {
+      _queue_contents[allocated_offset % _queue_size]->copyContent(oldTS, newTS,
+                                                                   iter, value);
+      return true;
+    }
+    _enqueue_head.fetch_sub(1);
+    return false;
+  }
+
+  std::shared_ptr<AsyncBufferEntry> DequeueOneEntry() {
+    uint32_t accessing_offset = _dequeue_tail.fetch_add(1);
+
+    if (accessing_offset < _enqueue_head.load()) {
+      return _queue_contents[accessing_offset % _queue_size];
+    }
+    _dequeue_tail.fetch_sub(1);
+    return nullptr;
+  }
+};
 
 class PBRB {
  public:
   // constructor
   PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-       SchemaUMap *umap, uint64_t retentionWindowSecs = 60, uint32_t maxPageSearchNum = 5);
+       SchemaUMap *umap, uint64_t retentionWindowSecs = 60,
+       uint32_t maxPageSearchNum = 5, bool async_pbrb = false);
   // dtor
   ~PBRB();
 
@@ -96,11 +165,17 @@ class PBRB {
   SchemaUMap *_schemaUMap;
 
   friend class BufferListBySchema;
+
   std::map<SchemaId, BufferListBySchema> _bufferMap;
+
+  bool _async_pbrb = false;
+  std::map<SchemaId, std::shared_ptr<AsyncBufferQueue>> _asyncQueue;
+
   TimeStamp _watermark;
 
   uint64_t _retentionWindowSecs = 60;  // 1 minute
 
+ private:
   BufferPage *getPageAddr(void *rowAddr);
 
   std::list<BufferPage *> getFreePageList() { return _freePageList; }
@@ -240,18 +315,22 @@ class PBRB {
 
   // GC
  private:
-  bool _traverseIdxGCBySchema(SchemaId schemaid);
+  bool _traverseIdxGCBySchema(SchemaId schemaId);
+  bool syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+                 const Value &value, IndexerIterator iter);
+  bool asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+                  const Value &value, IndexerIterator iter);
+  void asyncWriteHandler();
 
  public:
   bool traverseIdxGC();
 
  public:
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
-            SchemaId schemaid, Value &value, ValuePtr *vPtr);
-  bool syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
-                 const Value &value, IndexerIterator iter);
-  bool asyncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
-                  const Value &value, IndexerIterator iter);
+            SchemaId schemaId, Value &value, ValuePtr *vPtr);
+  bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+             const Value &value, IndexerIterator iter);
+
   bool dropRow(RowAddr rAddr);
   // GTEST
   FRIEND_TEST(PBRBTest, Test01);

@@ -20,8 +20,6 @@
 
 namespace NKV {
 
-#define SHARD_NUM 64
-
 class NeoPMKV {
  public:
   NeoPMKV(std::string db_path = "/mnt/pmem0/tmp-neopmkv",
@@ -29,7 +27,6 @@ class NeoPMKV {
           bool enable_pbrb = false, bool async_pbrb = false,
           uint32_t maxPageNum = 1ull << 18) {
     _enable_pbrb = enable_pbrb;
-    _async_pbrb = async_pbrb;
 
     // initialize the pmemlog
     _engine_config.chunk_size = chunk_size;
@@ -43,7 +40,8 @@ class NeoPMKV {
       // get the timestamp now
       TimeStamp ts_start_pbrb;
       ts_start_pbrb.getNow();
-      _pbrb = new PBRB(maxPageNum, &ts_start_pbrb, &_indexerList, &_sUMap);
+      _pbrb = new PBRB(maxPageNum, &ts_start_pbrb, &_indexerList, &_sUMap, 60,
+                       5, async_pbrb);
     }
   }
   ~NeoPMKV() {
@@ -91,7 +89,6 @@ class NeoPMKV {
 
   // pbrb part
   bool _enable_pbrb = false;
-  bool _async_pbrb = false;
   PBRB *_pbrb = nullptr;
 
   PmemEngineConfig _engine_config;
@@ -114,36 +111,7 @@ class NeoPMKV {
   } _durationStat;
 
  public:
-  void outputReadStat() {
-    NKV_LOG_I(std::cout,
-              "PMem: Read Count: {}, Total Time Cost: {:.2f} s, Average Time "
-              "Cost: {:.2f} ns",
-              _durationStat.pmemReadCount.load(),
-              _durationStat.pmemReadTimeNanoSecs.load() / (double)NANOSEC_BASE,
-              _durationStat.pmemReadTimeNanoSecs.load() /
-                  (double)_durationStat.pmemReadCount.load());
-    NKV_LOG_I(std::cout,
-              "PMem: Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
-              "Cost: {:.2f} ns",
-              _durationStat.pmemWriteCount.load(),
-              _durationStat.pmemWriteTimeNanoSecs.load() / (double)NANOSEC_BASE,
-              _durationStat.pmemWriteTimeNanoSecs.load() /
-                  (double)_durationStat.pmemWriteCount.load());
-    NKV_LOG_I(std::cout,
-              "PBRB: Read Count: {}, Total Time Cost: {:.2f} s, Average Time "
-              "Cost: {:.2f} ns",
-              _durationStat.pbrbReadCount.load(),
-              _durationStat.pbrbReadTimeNanoSecs.load() / (double)NANOSEC_BASE,
-              _durationStat.pbrbReadTimeNanoSecs.load() /
-                  (double)_durationStat.pbrbReadCount.load());
-    NKV_LOG_I(std::cout,
-              "PBRB: Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
-              "Cost: {:.2f} ns",
-              _durationStat.pbrbWriteCount.load(),
-              _durationStat.pbrbWriteTimeNanoSecs.load() / (double)NANOSEC_BASE,
-              _durationStat.pbrbWriteTimeNanoSecs.load() /
-                  (double)_durationStat.pbrbWriteCount.load());
-  }
+  void outputReadStat();
 #endif
 };
 

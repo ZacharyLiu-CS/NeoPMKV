@@ -14,13 +14,10 @@
 namespace NKV {
 struct TimeStamp {
   uint64_t txn_nanoseconds = 0;
-  void getNow() {
-    txn_nanoseconds = rte_rdtsc();
-  }
 
-  void moveBackward(uint64_t ticks) {
-    txn_nanoseconds -= ticks;
-  }
+  void getNow() { txn_nanoseconds = rte_rdtsc(); }
+
+  void moveBackward(uint64_t ticks) { txn_nanoseconds -= ticks; }
   bool eq(TimeStamp ts) { return this->txn_nanoseconds == ts.txn_nanoseconds; }
   bool ne(TimeStamp ts) { return this->txn_nanoseconds != ts.txn_nanoseconds; }
   bool gt(TimeStamp ts) { return this->txn_nanoseconds > ts.txn_nanoseconds; }

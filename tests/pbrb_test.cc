@@ -23,7 +23,7 @@ TEST(PBRBTest, Test01) {
   indexerList.insert({1, std::make_shared<IndexerT>()});
   auto indexer = indexerList[1];
   uint32_t maxPageNum = 100;
-  PBRB pbrb(maxPageNum, &timestamp, &indexerList, &sUMap);
+  PBRB pbrb(maxPageNum, &timestamp, &indexerList, &sUMap, 60, 5, false);
 
   struct schema1Value {
     uint16_t field1;
@@ -72,7 +72,7 @@ TEST(PBRBTest, Test01) {
         Value pbrb_v1 = Value(12, '1');
         TimeStamp ts_step1;
         ts_step1.getNow();
-        bool status = pbrb.syncwrite(vPtr->getTimestamp(), ts_step1,
+        bool status = pbrb.write(vPtr->getTimestamp(), ts_step1,
                                      k1.schemaId, pbrb_v1, idxIter);
         ASSERT_EQ(status, true);
         ASSERT_EQ(vPtr->isHot(), true);
@@ -193,7 +193,7 @@ TEST(PBRBTest, Test02) {
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
-  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap);
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false);
 
   auto &indexer = indexerList[1];
   // Cache all KVs
@@ -221,7 +221,7 @@ TEST(PBRBTest, Test02) {
           pbrb.schemaMiss(schema02.schemaId);
           TimeStamp tsInsert;
           tsInsert.getNow();
-          bool status = pbrb.syncwrite(vPtr->getTimestamp(), tsInsert,
+          bool status = pbrb.write(vPtr->getTimestamp(), tsInsert,
                                        key.schemaId, values[pk - 1], idxIter);
           ASSERT_EQ(status, true);
           ASSERT_EQ(vPtr->isHot(), true);
@@ -255,7 +255,7 @@ TEST(PBRBTest, Test03) {
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
-  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 5);
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false);
 
   auto &indexer = indexerList[1];
   std::vector<uint64_t> seq[] = {
@@ -288,7 +288,7 @@ TEST(PBRBTest, Test03) {
           NKV_LOG_I(std::cout, "[pk = {:4}] : [miss]", pk);
           TimeStamp tsInsert;
           tsInsert.getNow();
-          bool status = pbrb.syncwrite(vPtr->getTimestamp(), tsInsert,
+          bool status = pbrb.write(vPtr->getTimestamp(), tsInsert,
                                        key.schemaId, values[pk - 1], idxIter);
           ASSERT_EQ(status, true);
           ASSERT_EQ(vPtr->isHot(), true);

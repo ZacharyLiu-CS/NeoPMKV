@@ -66,10 +66,8 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     TimeStamp tsInsert;
     tsInsert.getNow();
     _pbrb->schemaMiss(schemaid);
-    if (_async_pbrb == false) {
-      bool status = _pbrb->syncwrite(vPtr.getTimestamp(), tsInsert, schemaid,
-                                     value, idxIter);
-    }
+    bool status =
+        _pbrb->write(vPtr.getTimestamp(), tsInsert, schemaid, value, idxIter);
 #ifdef ENABLE_STATISTICS
     _timer.end();
     _durationStat.pbrbWriteCount.fetch_add(1);
@@ -191,5 +189,37 @@ bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
   }
   return true;
 }
+#ifdef ENABLE_STATISTICS
+void NeoPMKV::outputReadStat() {
+  NKV_LOG_I(std::cout,
+            "PMem: Read Count: {}, Total Time Cost: {:.2f} s, Average Time "
+            "Cost: {:.2f} ns",
+            _durationStat.pmemReadCount.load(),
+            _durationStat.pmemReadTimeNanoSecs.load() / (double)NANOSEC_BASE,
+            _durationStat.pmemReadTimeNanoSecs.load() /
+                (double)_durationStat.pmemReadCount.load());
+  NKV_LOG_I(std::cout,
+            "PMem: Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
+            "Cost: {:.2f} ns",
+            _durationStat.pmemWriteCount.load(),
+            _durationStat.pmemWriteTimeNanoSecs.load() / (double)NANOSEC_BASE,
+            _durationStat.pmemWriteTimeNanoSecs.load() /
+                (double)_durationStat.pmemWriteCount.load());
+  NKV_LOG_I(std::cout,
+            "PBRB: Read Count: {}, Total Time Cost: {:.2f} s, Average Time "
+            "Cost: {:.2f} ns",
+            _durationStat.pbrbReadCount.load(),
+            _durationStat.pbrbReadTimeNanoSecs.load() / (double)NANOSEC_BASE,
+            _durationStat.pbrbReadTimeNanoSecs.load() /
+                (double)_durationStat.pbrbReadCount.load());
+  NKV_LOG_I(std::cout,
+            "PBRB: Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
+            "Cost: {:.2f} ns",
+            _durationStat.pbrbWriteCount.load(),
+            _durationStat.pbrbWriteTimeNanoSecs.load() / (double)NANOSEC_BASE,
+            _durationStat.pbrbWriteTimeNanoSecs.load() /
+                (double)_durationStat.pbrbWriteCount.load());
+}
+#endif
 
 }  // namespace NKV

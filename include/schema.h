@@ -8,7 +8,9 @@
 
 #pragma once
 #include <atomic>
+#include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -24,7 +26,7 @@ using SchemaVer = uint16_t;
 
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
-const uint32_t PmemEntryHead =  sizeof(uint32_t);
+const uint32_t PmemEntryHead = sizeof(uint32_t);
 
 using RowAddr = void *;
 const uint32_t ERRMASK = 1 << 31;
@@ -65,9 +67,9 @@ using Value = std::string;
 
 class ValuePtr {
  public:
-  ValuePtr() { }
+  ValuePtr() {}
 
-  ~ValuePtr() { }
+  ~ValuePtr() {}
 
   ValuePtr(const ValuePtr &valuePtr) {
     _timestamp = valuePtr._timestamp;
@@ -180,13 +182,23 @@ struct FieldMetaData {
 };
 
 struct Schema {
+  // define the schema name
   std::string name;
   SchemaVer version = 0;
   uint32_t schemaId = ERRMASK;
+  // the primary key field id
   uint32_t primaryKeyField = 0;
+  // define the schema data size
+  // field format: | field head  |  field content  |
+  //                    ^                 ^
+  //                    |                 |
+  //       size:       4 bytes         field size
+  uint32_t size = 0;
+  // all field attributes
+  // meta data of field in storage
   std::vector<SchemaField> fields;
   std::vector<FieldMetaData> fieldsMeta;
-  uint32_t size = 0;
+
   Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
          std::vector<SchemaField> &fields)
       : name(name),
@@ -213,9 +225,11 @@ struct Schema {
     for (auto i : fields) size += i.size + sizeof(uint32_t);
     return size;
   }
+
   inline uint32_t getPmemOffset(uint32_t fieldId) {
     return fieldsMeta[fieldId].fieldOffset + PmemEntryHead;
   }
+
   inline uint32_t getPmemOffset(const std::string &fieldName) {
     uint32_t fieldId = 0;
     for (auto i : fields) {
@@ -226,13 +240,16 @@ struct Schema {
   }
 };
 
-struct SchemaAllocator {
+class SchemaAllocator {
   std::atomic_uint32_t idx{1};
+  public:
   Schema createSchema(std::string name, uint32_t primaryKeyField,
                       std::vector<SchemaField> &fields) {
     return Schema(name, idx.fetch_add(1), primaryKeyField, fields);
   }
 };
+
+
 class SchemaUMap {
  private:
   std::unordered_map<SchemaId, Schema> _umap;
@@ -258,7 +275,7 @@ class SchemaUMap {
   }
 
   decltype(_umap.begin()) begin() { return _umap.begin(); }
-  decltype(_umap.end()) end() {return _umap.end(); }
+  decltype(_umap.end()) end() { return _umap.end(); }
 };
 
 }  // namespace NKV

@@ -7,6 +7,7 @@
 //
 
 #include "pbrb.h"
+#include <thread>
 
 namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
@@ -55,9 +56,11 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
 
   if (_async_pbrb == true) {
     uint32_t schemaSize = _schemaUMap->find(schemaId)->getSize();
-    _asyncQueue.insert_or_assign(
-        schemaId, std::make_shared<AsyncBufferQueue>(schemaId, schemaSize,
-                                                     pbrbAsyncQueueSize));
+    auto bufferQueue = std::make_shared<AsyncBufferQueue>(schemaId, schemaSize,
+                                                          pbrbAsyncQueueSize);
+    _asyncQueue.insert_or_assign(schemaId, bufferQueue);
+    std::thread asyncThread(&PBRB::asyncWriteHandler, this, bufferQueue);
+    asyncThread.detach();
   }
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = _freePageList.front();
@@ -474,7 +477,20 @@ bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
   return _asyncQueue[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
 }
 
-void PBRB::asyncWriteHandler() {}
+void PBRB::asyncWriteHandler(
+    std::shared_ptr<AsyncBufferQueue> asyncBufferQueue) {
+  while (true) {
+    if (asyncBufferQueue->IsEmpty()) {
+      auto bufferEntry = asyncBufferQueue->DequeueOneEntry();
+      if (bufferEntry != nullptr) {
+        syncWrite(bufferEntry->_oldTS, bufferEntry->_newTS,
+                  asyncBufferQueue->getSchemaId(), bufferEntry->_entry_content,
+                  bufferEntry->_iter);
+      }
+    }
+    // std::this_thread::yield();
+  }
+}
 bool PBRB::dropRow(RowAddr rAddr) {
   auto [pagePtr, rowOffset] = findPageAndRowByAddr(rAddr);
   bool result = pagePtr->clearRowBitMapPage(rowOffset);

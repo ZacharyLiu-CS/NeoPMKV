@@ -10,6 +10,7 @@
 
 #include <oneapi/tbb/concurrent_map.h>
 #include <algorithm>
+#include <atomic>
 #include <bitset>
 #include <cassert>
 #include <cstddef>
@@ -70,7 +71,7 @@ struct AsyncBufferEntry {
 
 class AsyncBufferQueue {
  private:
-  uint32_t _schema_id = 0;
+  SchemaId _schema_id = 0;
   uint32_t _schema_size = 0;
   uint32_t _queue_size = 0;
 
@@ -90,27 +91,33 @@ class AsyncBufferQueue {
       _queue_contents[i] = std::make_shared<AsyncBufferEntry>(schema_size);
     }
   }
+  SchemaId getSchemaId() { return _schema_id; }
 
   bool EnqueueOneEntry(TimeStamp oldTS, TimeStamp newTS, IndexerIterator iter,
                        const Value &value) {
-    uint32_t allocated_offset = _enqueue_head.fetch_add(1);
-    if (allocated_offset < _dequeue_tail.load() + _queue_size) {
+    uint32_t allocated_offset =
+        _enqueue_head.fetch_add(1, std::memory_order_relaxed);
+    if (allocated_offset <
+        _dequeue_tail.load(std::memory_order_relaxed) + _queue_size) {
       _queue_contents[allocated_offset % _queue_size]->copyContent(oldTS, newTS,
                                                                    iter, value);
       return true;
     }
-    _enqueue_head.fetch_sub(1);
+    _enqueue_head.fetch_sub(1, std::memory_order_relaxed);
     return false;
   }
 
   std::shared_ptr<AsyncBufferEntry> DequeueOneEntry() {
     uint32_t accessing_offset = _dequeue_tail.fetch_add(1);
 
-    if (accessing_offset < _enqueue_head.load()) {
+    if (accessing_offset < _enqueue_head.load(std::memory_order_relaxed)) {
       return _queue_contents[accessing_offset % _queue_size];
     }
-    _dequeue_tail.fetch_sub(1);
+    _dequeue_tail.fetch_sub(1, std::memory_order_relaxed);
     return nullptr;
+  }
+  bool IsEmpty() {
+    return _enqueue_head.load(std::memory_order_relaxed) > _dequeue_tail.load(std::memory_order_relaxed);
   }
 };
 
@@ -320,7 +327,7 @@ class PBRB {
                  const Value &value, IndexerIterator iter);
   bool asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                   const Value &value, IndexerIterator iter);
-  void asyncWriteHandler();
+  void asyncWriteHandler(std::shared_ptr<AsyncBufferQueue> asyncBufferQueue);
 
  public:
   bool traverseIdxGC();

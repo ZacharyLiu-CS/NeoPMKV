@@ -49,7 +49,7 @@ bool BufferListBySchema::reclaimPage(std::list<BufferPage *> &freePageList,
 
     // special: only 1 page now
     if (headPage == nullptr) {
-      assert(curPageNum == 0);
+      assert(curPageNum.load() == 0);
       tailPage = nullptr;
       freePageList.emplace_back(pagePtr);
       return true;
@@ -72,7 +72,7 @@ bool BufferListBySchema::reclaimPage(std::list<BufferPage *> &freePageList,
 
 uint64_t BufferListBySchema::reclaimEmptyPages(
     std::list<BufferPage *> &freePageList) {
-  if (curPageNum == 0) return 0;
+  if (curPageNum.load() == 0) return 0;
   uint64_t reclaimedPageNum = 0;
 
   // Traverse linked list

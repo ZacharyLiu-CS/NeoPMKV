@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <list>
 #include "buffer_page.h"
 #include "schema.h"
@@ -26,8 +27,8 @@ class BufferListBySchema {
   uint32_t rowSize = 0;
 
   uint32_t firstRowOffset = 0;
-  uint32_t curPageNum = 0;
-  uint32_t curRowNum = 0;
+  std::atomic<uint32_t> curPageNum;
+  std::atomic<uint32_t> curRowNum;
 
   SchemaUMap *sUMap = nullptr;
   // manage the buffer list
@@ -37,10 +38,13 @@ class BufferListBySchema {
  public:
   // return occupancy Ratio
   double getOccupancyRatio() {
-    if (curRowNum != 0) {
-      NKV_LOG_I(std::cout, "curRowNum: {}, maxRowNum: {}", curRowNum,
-                curPageNum * maxRowCnt);
-      return ((double)curRowNum) / (curPageNum * maxRowCnt);
+    uint32_t rNum, pNum;
+    rNum = curRowNum.load();
+    pNum = curPageNum.load();
+    if (rNum != 0) {
+      NKV_LOG_I(std::cout, "curRowNum: {}, maxRowNum: {}", rNum,
+                pNum * maxRowCnt);
+      return ((double)rNum) / (pNum * maxRowCnt);
     } else
       return 0;
   }
@@ -49,12 +53,16 @@ class BufferListBySchema {
 
   BufferListBySchema() {}
 
+  ~BufferListBySchema() {}
+
   BufferListBySchema(SchemaId schemaId, uint32_t pageSize,
                      uint32_t pageHeaderSize, uint32_t rowHeaderSize,
                      SchemaUMap *sUMapPtr, BufferPage *headPagePtr) {
     sUMap = sUMapPtr;
     headPage = headPagePtr;
     tailPage = headPagePtr;
+    curRowNum = 0;
+    curPageNum = 0;
     setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
   }
   void setOccuBitmapSize(uint32_t pageSize);

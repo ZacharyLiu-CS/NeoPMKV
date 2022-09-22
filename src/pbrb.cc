@@ -32,9 +32,14 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   for (int idx = 0; idx < maxPageNumber; idx++) {
     _freePageList.push_back(_bufferPoolPtr + idx);
   }
+
+  _isGCRunning = true;
+  int test = 0;
+  _GCResult = std::async(std::launch::async, &PBRB::_asyncTraverseIdxGC, this);
 }
 
 PBRB::~PBRB() {
+  _stopGC();
   if (_bufferPoolPtr != nullptr) {
     delete _bufferPoolPtr;
   }
@@ -54,26 +59,28 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = _freePageList.front();
 
-  _bufferMap.insert_or_assign(
-      schemaId, BufferListBySchema(schemaId, _pageSize, _pageHeaderSize,
-                                   _rowHeaderSize, _schemaUMap, pagePtr));
-  BufferListBySchema &blbs = _bufferMap[schemaId];
+  std::shared_ptr<BufferListBySchema> blbsPtr =
+      std::make_shared<BufferListBySchema>(schemaId, _pageSize, _pageHeaderSize,
+                                           _rowHeaderSize, _schemaUMap,
+                                           pagePtr);
+  _bufferMap.insert_or_assign(schemaId, blbsPtr);
+  auto &blbs = _bufferMap[schemaId];
   NKV_LOG_I(
       std::cout,
       "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList "
-      "size:{}, pageSize: {}, blbs.rowSize: {}, _bufferMap[{}].rowSize: {}, "
+      "size:{}, pageSize: {}, blbs->rowSize: {}, _bufferMap[{}].rowSize: {}, "
       "maxRowCnt: {}",
       schemaId, pagePtr == nullptr, _freePageList.size(), sizeof(BufferPage),
-      blbs.rowSize, schemaId, _bufferMap[schemaId].rowSize, blbs.maxRowCnt);
+      blbs->rowSize, schemaId, blbs->rowSize, blbs->maxRowCnt);
 
   // Initialize Page.
   // memset(pagePtr, 0, sizeof(BufferPage));
 
-  pagePtr->initializePage(blbs.occuBitmapSize);
+  pagePtr->initializePage(blbs->occuBitmapSize);
   pagePtr->setSchemaIDPage(schemaId);
   pagePtr->setSchemaVerPage(schemaVer);
 
-  blbs.curPageNum++;
+  blbs->curPageNum++;
   _freePageList.pop_front();
   _AccStatBySchema.insert({schemaId, AccessStatistics()});
 
@@ -97,9 +104,9 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     return nullptr;
   }
 
-  BufferListBySchema &blbs = _bufferMap[schemaId];
-  BufferPage *pagePtr = blbs.headPage;
-  blbs.curPageNum++;
+  auto &blbs = _bufferMap[schemaId];
+  BufferPage *pagePtr = blbs->headPage;
+  blbs->curPageNum++;
 
   auto al1ns = pointTimer.end();
 
@@ -112,17 +119,17 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     BufferPage *newPage = _freePageList.front();
 
     // Initialize Page.
-    newPage->initializePage(blbs.occuBitmapSize);
+    newPage->initializePage(blbs->occuBitmapSize);
     newPage->setSchemaIDPage(schemaId);
-    newPage->setSchemaVerPage(blbs.ownSchema->version);
+    newPage->setSchemaVerPage(blbs->ownSchema->version);
 
     // optimize: using tailPage.
-    BufferPage *tail = blbs.tailPage;
+    BufferPage *tail = blbs->tailPage;
     // set nextpage
     newPage->setPrevPage(tail);
     newPage->setNextPage(nullptr);
     tail->setNextPage(newPage);
-    blbs.tailPage = newPage;
+    blbs->tailPage = newPage;
 
     auto al2ns = pointTimer.end();
 
@@ -140,8 +147,8 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     NKV_LOG_D(std::cout,
               "Allocated page for schema: {}, page count: {}, time al1: {}, "
               "al2: {}, al3: {}, total: {}",
-              blbs.ownSchema->name, blbs.curPageNum, al1ns, al2ns, al3ns,
-              al1ns + al2ns + al3ns);
+              blbs->ownSchema->name, (blbs->curPageNum)->load, al1ns, al2ns,
+              al3ns, al1ns + al2ns + al3ns);
 
     return newPage;
   }
@@ -168,15 +175,15 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
     return nullptr;
   }
 
-  BufferListBySchema &blbs = _bufferMap[schemaId];
+  auto &blbs = _bufferMap[schemaId];
   BufferPage *newPage = _freePageList.front();
-  blbs.curPageNum++;
+  blbs->curPageNum++;
 
   // Initialize Page.
   // memset(newPage, 0, sizeof(BufferPage));
-  newPage->initializePage(blbs.occuBitmapSize);
+  newPage->initializePage(blbs->occuBitmapSize);
   newPage->setSchemaIDPage(schemaId);
-  newPage->setSchemaVerPage(blbs.ownSchema->version);
+  newPage->setSchemaVerPage(blbs->ownSchema->version);
 
   // insert behind pagePtr
   // pagePtr -> newPage -> nextPage;
@@ -192,7 +199,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
     newPage->setNextPage(nullptr);
     newPage->setPrevPage(pagePtr);
     pagePtr->setNextPage(newPage);
-    blbs.tailPage = newPage;
+    blbs->tailPage = newPage;
   }
 
   _freePageList.pop_front();
@@ -210,19 +217,19 @@ std::pair<BufferPage *, RowOffset> PBRB::findPageAndRowByAddr(void *rowAddr) {
   BufferPage *pagePtr = getPageAddr(rowAddr);
   uint32_t offset = (uint64_t)rowAddr & mask;
   SchemaId sid = pagePtr->getSchemaIDPage();
-  BufferListBySchema &blbs = _bufferMap[sid];
+  auto &blbs = _bufferMap[sid];
   RowOffset rowOff =
-      (offset - blbs.firstRowOffset - _pageHeaderSize) / blbs.rowSize;
-  if ((offset - blbs.firstRowOffset - _pageHeaderSize) % blbs.rowSize != 0)
+      (offset - blbs->firstRowOffset - _pageHeaderSize) / blbs->rowSize;
+  if ((offset - blbs->firstRowOffset - _pageHeaderSize) % blbs->rowSize != 0)
     NKV_LOG_I(std::cout, "WARN: offset maybe wrong!");
   return std::make_pair(pagePtr, rowOff);
 }
 
 RowAddr PBRB::getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff) {
   SchemaId sid = pagePtr->getSchemaIDPage();
-  BufferListBySchema &blbs = _bufferMap[sid];
+  auto &blbs = _bufferMap[sid];
   uint32_t offset =
-      _pageHeaderSize + blbs.firstRowOffset + rowOff * blbs.rowSize;
+      _pageHeaderSize + blbs->firstRowOffset + rowOff * blbs->rowSize;
   return (uint8_t *)pagePtr + offset;
 }
 
@@ -232,11 +239,10 @@ RowAddr PBRB::getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff) {
 
 // @brief Find first empty slot in BufferPage pageptr
 // @return rowOffset (UINT32_MAX for not found).
-inline RowOffset PBRB::findEmptySlotInPage(BufferListBySchema &blbs,
-                                           BufferPage *pagePtr,
-                                           RowOffset beginOffset,
-                                           RowOffset endOffset) {
-  if (pagePtr->getHotRowsNumPage() >= blbs.maxRowCnt) {
+inline RowOffset PBRB::findEmptySlotInPage(
+    std::shared_ptr<BufferListBySchema> &blbs, BufferPage *pagePtr,
+    RowOffset beginOffset, RowOffset endOffset) {
+  if (pagePtr->getHotRowsNumPage() >= blbs->maxRowCnt) {
     // NKV_LOG_I(std::cout, "BufferPage Full, skipped.");
     return UINT32_MAX;
   }
@@ -244,7 +250,7 @@ inline RowOffset PBRB::findEmptySlotInPage(BufferListBySchema &blbs,
   PointProfiler timer;
   timer.start();
 #endif
-  uint32_t result = pagePtr->getFirstZeroBit(blbs.maxRowCnt);
+  uint32_t result = pagePtr->getFirstZeroBit(blbs->maxRowCnt);
 
 #ifdef ENABLE_BREAKDOWN
   timer.end();
@@ -266,18 +272,18 @@ std::pair<BufferPage *, RowOffset> PBRB::traverseFindEmptyRow(
 
   // Default: Traverse from headPage.
   if (pagePtr == nullptr) {
-    BufferListBySchema &blbs = _bufferMap[schemaID];
-    pagePtr = blbs.headPage;
+    auto &blbs = _bufferMap[schemaID];
+    pagePtr = blbs->headPage;
     if (pagePtr == nullptr) {
       NKV_LOG_E(std::cerr,
-                "[Schema: {}, sid: {}:] blbs.headPage == nullptr, Aborted "
+                "[Schema: {}, sid: {}:] blbs->headPage == nullptr, Aborted "
                 "traversing.",
-                blbs.ownSchema->name, blbs.ownSchema->schemaId);
+                blbs->ownSchema->name, blbs->ownSchema->schemaId);
     }
   }
 
   BufferPage *travPagePtr = pagePtr;
-  BufferListBySchema &blbs = _bufferMap[schemaID];
+  auto &blbs = _bufferMap[schemaID];
   uint32_t visitedPageNum = 1;
   while (visitedPageNum < maxPageSearchingNum && travPagePtr != nullptr) {
     RowOffset rowOff = findEmptySlotInPage(blbs, travPagePtr);
@@ -376,13 +382,18 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
                 SchemaId schemaid, Value &value, ValuePtr *vPtr) {
   BufferPage *pagePtr = getPageAddr(addr);
-  BufferListBySchema &blbs = _bufferMap[schemaid];
-  value = pagePtr->getValueRow(addr, blbs.valueSize);
+  auto &blbs = _bufferMap[schemaid];
+  value = pagePtr->getValueRow(addr, blbs->valueSize);
   // Validation:
-  if (pagePtr->getTimestampRow(addr).gt(oldTS)) {
+  if (pagePtr->getTimestampRow(addr).ne(oldTS)) {
     // Expired: Somebody updated the row.
     // TODO: Handle this case
     NKV_LOG_E(std::cerr, "Expired Timestamp, Aborted.");
+    NKV_LOG_E(std::cerr,
+              "Detail: [oldTS: {}, vPtr->timestamp: {}, rowTS: {}, readNewTS: "
+              "{}, value: {}]",
+              oldTS, vPtr->getTimestamp(), pagePtr->getTimestampRow(addr),
+              newTS, value);
     return false;
   } else {
     pagePtr->setTimestampRow(addr, newTS);
@@ -406,10 +417,10 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
     createCacheForSchema(schemaid);
   }
   // Check value size:
-  BufferListBySchema &blbs = _bufferMap[schemaid];
-  if (blbs.valueSize != value.size()) {
-    NKV_LOG_E(std::cerr, "Value size: {} != blbs.valueSize: {}, Aborted",
-              value.size(), blbs.valueSize);
+  auto &blbs = _bufferMap[schemaid];
+  if (blbs->valueSize != value.size()) {
+    NKV_LOG_E(std::cerr, "Value size: {} != blbs->valueSize: {}, Aborted",
+              value.size(), blbs->valueSize);
     return false;
   }
 
@@ -418,7 +429,7 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
   BufferPage *pagePtr = retVal.first;
   RowOffset rowOffset = retVal.second;
   if (pagePtr == nullptr) {
-    NKV_LOG_I(std::cout, "Warning: Cannot find empty slot!");
+    NKV_LOG_E(std::cout, "Warning: Cannot find empty slot!");
     return false;
   }
   RowAddr rowAddr = getAddrByPageAndRow(pagePtr, rowOffset);
@@ -431,17 +442,17 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
     pagePtr->setPlogAddrRow(rowAddr, valuePtr->getPmemAddr());
     pagePtr->setKVNodeAddrRow(rowAddr, valuePtr);
     // copy row content:
-    pagePtr->setValueRow(rowAddr, value, blbs.valueSize);
+    pagePtr->setValueRow(rowAddr, value, blbs->valueSize);
     pagePtr->setRowBitMapPage(rowOffset);
-    blbs.curRowNum++;
+    blbs->curRowNum++;
   }
 
   // 4. Check consistency
   if (valuePtr->getTimestamp().ne(oldTS)) {
     // Rollback
     pagePtr->clearRowBitMapPage(rowOffset);
-    blbs.curRowNum--;
-    NKV_LOG_D(std::cout, "PBRB: Write operation timestamp conflict. Rollback");
+    blbs->curRowNum--;
+    NKV_LOG_E(std::cout, "PBRB: Write operation timestamp conflict. Rollback");
     return false;
   }
 
@@ -458,10 +469,10 @@ bool PBRB::dropRow(RowAddr rAddr) {
   auto [pagePtr, rowOffset] = findPageAndRowByAddr(rAddr);
   bool result = pagePtr->clearRowBitMapPage(rowOffset);
   if (result == true) {
-    BufferListBySchema &blbs = _bufferMap.at(pagePtr->getSchemaIDPage());
-    blbs.curRowNum--;
+    auto &blbs = _bufferMap.at(pagePtr->getSchemaIDPage());
+    blbs->curRowNum--;
     if (pagePtr->getHotRowsNumPage() == 0)
-      blbs.reclaimPage(_freePageList, pagePtr);
+      blbs->reclaimPage(_freePageList, pagePtr);
     return true;
   }
   return false;
@@ -469,27 +480,27 @@ bool PBRB::dropRow(RowAddr rAddr) {
 
 bool PBRB::evictRow(IndexerIterator &iter) {
   RowAddr rAddr = iter->second.getPBRBAddr();
-  if (dropRow(rAddr) == false) return false;
   iter->second.setIsHot(false);
+  if (dropRow(rAddr) == false) return false;
   _evictCnt++;
   return true;
 }
 
 bool PBRB::traverseIdxGC() {
-  // TODO: Select GC Schema
   std::vector<SchemaId> GCSchemaVec;
-  double freePageRatio = (double)getFreePageList().size() / getMaxPageNumber();
+  double occupancyRatio = _getOccupancyRatio();
 
   NKV_LOG_I(std::cout,
-            "Current number of free pages / max page number : ({} / {} = {})",
-            getFreePageList().size(), getMaxPageNumber(), freePageRatio);
-  if (freePageRatio >= 1 - targetOccupancyRatio) {
+            "Current number of free pages / max page number : ({} / {}), "
+            "OccupancyRatio = {:.3f}",
+            _freePageList.size(), getMaxPageNumber(), occupancyRatio);
+  if (occupancyRatio < targetOccupancyRatio) {
     return true;
   }
 
   for (auto &it : *_schemaUMap) {
     auto bMapIter = _bufferMap.find(it.first);
-    if (bMapIter != _bufferMap.end() && bMapIter->second.curRowNum != 0)
+    if (bMapIter != _bufferMap.end() && bMapIter->second->curRowNum.load() != 0)
       GCSchemaVec.emplace_back(it.first);
   }
 
@@ -510,8 +521,8 @@ bool PBRB::traverseIdxGC() {
   return true;
 }
 
-bool PBRB::_checkOccupancyRatio() {
-  return _getOccupancyRatio() < targetOccupancyRatio;
+bool PBRB::_checkOccupancyRatio(double ratio) {
+  return _getOccupancyRatio() < ratio;
 }
 
 bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
@@ -519,16 +530,17 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
   startTS.getNow();
   // Adjust retention window size
   TimeStamp watermark = startTS;
-  double occupancyRatio = _bufferMap.at(schemaid).getOccupancyRatio();
+  double occupancyRatio = _bufferMap.at(schemaid)->getOccupancyRatio();
   if (occupancyRatio == 0) return false;
-  double moveNanoSecs = (double)_retentionWindowSecs * 1000000000.0 *
-                        exp2(-GCFailedTimes) * (1 - occupancyRatio) / (1 - 0.7);
+  uint64_t moveNanoSecs = (double)_retentionWindowSecs * NANOSEC_BASE *
+                          exp2(-GCFailedTimes) * (1 - occupancyRatio) /
+                          (1 - targetOccupancyRatio);
   watermark.moveBackward(getTicksByNanosecs(moveNanoSecs));
   NKV_LOG_I(std::cout,
             "Start to GC schema id: {}, startTS: {}, watermark: {}, "
             "_retentionWindowSecs: {}s",
             schemaid, startTS, watermark, _retentionWindowSecs);
-  NKV_LOG_I(std::cout, "Occupancy Ratio: {:.4f}, real moved nanoSecs:{:.0f}",
+  NKV_LOG_I(std::cout, "Occupancy Ratio: {:.4f}, real moved nanoSecs:{:12d}",
             occupancyRatio, moveNanoSecs);
 
   // Traversal
@@ -542,7 +554,7 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
       continue;
     if (evictRow(iter)) {
       evictCnt++;
-      if (_checkOccupancyRatio()) {
+      if (_checkOccupancyRatio(targetOccupancyRatio)) {
         achieveTarget = true;
         break;
       }
@@ -558,8 +570,28 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
   NKV_LOG_I(
       std::cout,
       "End GC for schema id: {}, evicted: {} rows, occupancy ratio: {:.6f}",
-      schemaid, evictCnt, _bufferMap.at(schemaid).getOccupancyRatio());
+      schemaid, evictCnt, _bufferMap.at(schemaid)->getOccupancyRatio());
   return achieveTarget;
 }
 
+bool PBRB::_asyncTraverseIdxGC() {
+  auto interval = std::chrono::milliseconds(20);
+  while (_isGCRunning) {
+    if (_checkOccupancyRatio(startGCOccupancyRatio)) {
+      std::this_thread::sleep_for(interval);
+      // std::this_thread::yield();
+    } else {
+      std::lock_guard<std::mutex> guard(traverseIdxGCLock_);
+      traverseIdxGC();
+    }
+  };
+  return true;
+}
+
+void PBRB::_stopGC() {
+  _isGCRunning = false;
+  _GCResult.wait();
+  if (_GCResult.get() == true)
+    NKV_LOG_I(std::cout, "Successfully stopped _asyncGC.");
+}
 }  // namespace NKV

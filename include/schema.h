@@ -24,7 +24,7 @@ using SchemaVer = uint16_t;
 
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
-const uint32_t PmemEntryHead =  sizeof(uint32_t);
+const uint32_t PmemEntryHead = sizeof(uint32_t);
 
 using RowAddr = void *;
 const uint32_t ERRMASK = 1 << 31;
@@ -65,9 +65,9 @@ using Value = std::string;
 
 class ValuePtr {
  public:
-  ValuePtr() { }
+  ValuePtr() {}
 
-  ~ValuePtr() { }
+  ~ValuePtr() {}
 
   ValuePtr(const ValuePtr &valuePtr) {
     _timestamp = valuePtr._timestamp;
@@ -92,10 +92,19 @@ class ValuePtr {
 
   bool isHot() { return _isHot; }
 
-  void setIsHot(bool isHot) { _isHot = isHot; }
+  void setIsHot(bool isHot) {
+    std::lock_guard<std::mutex> lock(_updateLock);
+    _isHot = isHot;
+  }
 
-  void updateTS() { this->_timestamp.getNow(); }
-  void updateTS(TimeStamp newTS) { this->_timestamp = newTS; }
+  void updateTS() {
+    std::lock_guard<std::mutex> lock(_updateLock);
+    this->_timestamp.getNow();
+  }
+  void updateTS(TimeStamp newTS) {
+    std::lock_guard<std::mutex> lock(_updateLock);
+    this->_timestamp = newTS;
+  }
 
   void updatePmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
     std::lock_guard<std::mutex> lock(_updateLock);
@@ -258,7 +267,7 @@ class SchemaUMap {
   }
 
   decltype(_umap.begin()) begin() { return _umap.begin(); }
-  decltype(_umap.end()) end() {return _umap.end(); }
+  decltype(_umap.end()) end() { return _umap.end(); }
 };
 
 }  // namespace NKV

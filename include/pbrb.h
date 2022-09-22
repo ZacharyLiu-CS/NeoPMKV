@@ -8,13 +8,16 @@
 
 #pragma once
 
+#include <oneapi/tbb/concurrent_map.h>
 #include <algorithm>
 #include <bitset>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <list>
 #include <map>
@@ -24,7 +27,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-#include <oneapi/tbb/concurrent_map.h>
 
 // header of this project
 #include "buffer_list.h"
@@ -43,7 +45,8 @@ const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerT =
+    oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
 using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
 using IndexerIterator = IndexerT::iterator;
 
@@ -76,6 +79,7 @@ class PBRB {
 #endif
 
  private:
+  bool _isGCRunning = false;
   uint32_t _maxPageNumber;
   uint32_t _pageSize = pageSize;
   uint32_t _pageHeaderSize = PAGE_HEADER_SIZE;
@@ -98,16 +102,17 @@ class PBRB {
   SchemaUMap *_schemaUMap;
 
   friend class BufferListBySchema;
-  std::map<SchemaId, BufferListBySchema> _bufferMap;
+  std::map<SchemaId, std::shared_ptr<BufferListBySchema>> _bufferMap;
   TimeStamp _watermark;
 
   int32_t GCFailedTimes = 0;
   uint64_t _retentionWindowSecs = 60;  // 1 minute
   double targetOccupancyRatio = 0.7;
+  double startGCOccupancyRatio = 0.75;
 
   BufferPage *getPageAddr(void *rowAddr);
 
-  std::list<BufferPage *> getFreePageList() { return _freePageList; }
+  std::list<BufferPage *> &getFreePageList() { return _freePageList; }
 
   uint32_t getMaxPageNumber() { return _maxPageNumber; }
 
@@ -130,10 +135,9 @@ class PBRB {
                            RowOffset rowOffset, ValuePtr *vPtr, void *nodePtr);
 
   // find an empty slot between the beginOffset and endOffset in the page
-  inline RowOffset findEmptySlotInPage(BufferListBySchema &blbs,
-                                       BufferPage *pagePtr,
-                                       RowOffset beginOffset = 0,
-                                       RowOffset endOffset = UINT32_MAX);
+  inline RowOffset findEmptySlotInPage(
+      std::shared_ptr<BufferListBySchema> &blbs, BufferPage *pagePtr,
+      RowOffset beginOffset = 0, RowOffset endOffset = UINT32_MAX);
 
   // find an empty slot in the page
 
@@ -159,7 +163,6 @@ class PBRB {
   std::pair<BufferPage *, RowOffset> findPageAndRowByAddr(void *rowAddr);
   RowAddr getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff);
   // evict row and return cold addr.
-  bool evictRow(IndexerIterator &iter);
 
   // mark the row as unoccupied when evicting a hot row
   void removeHotRow(BufferPage *pagePtr, RowOffset offset);
@@ -243,12 +246,14 @@ class PBRB {
  public:
   bool schemaHit(SchemaId sid) {
     auto &accStat = _AccStatBySchema[sid];
-    if (accStat.hit()) traverseIdxGC();
+    if (accStat.hit())
+      ;  // traverseIdxGC();
     return true;
   }
   bool schemaMiss(SchemaId sid) {
     auto &accStat = _AccStatBySchema[sid];
-    if (accStat.miss()) traverseIdxGC();
+    if (accStat.miss())
+      ;  // traverseIdxGC();
     return true;
   }
   double getHitRatio(SchemaId sid) {
@@ -278,16 +283,20 @@ class PBRB {
   }
 
  private:
+  std::future<bool> _GCResult;
   std::mutex writeLock_;
-
+  std::mutex traverseIdxGCLock_;
   // GC
  private:
   bool _traverseIdxGCBySchema(SchemaId schemaid);
   bool _reclaimEmptyPages(SchemaId schemaid);
-  inline bool _checkOccupancyRatio();
+  inline bool _checkOccupancyRatio(double ratio);
   inline double _getOccupancyRatio() {
     return 1 - ((double)_freePageList.size() / _maxPageNumber);
   }
+
+  void _stopGC();
+  bool _asyncTraverseIdxGC();
 
  public:
   bool traverseIdxGC();
@@ -300,6 +309,8 @@ class PBRB {
   bool asyncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
                   const Value &value, IndexerIterator iter);
   bool dropRow(RowAddr rAddr);
+
+  bool evictRow(IndexerIterator &iter);
   // GTEST
 
   friend class BufferListBySchema;

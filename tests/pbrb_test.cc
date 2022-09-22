@@ -299,7 +299,7 @@ TEST(PBRBTest, Test03) {
     timer.end();
     NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s (Sleeped {}s)", i + 1,
               timer.duration() / (double) NANOSEC_BASE, sleepTime[i]);
-    pbrb.traverseIdxGC();
+    // pbrb.traverseIdxGC();
   }
 #ifdef ENABLE_BREAKDOWN
   pbrb.analyzePerf();

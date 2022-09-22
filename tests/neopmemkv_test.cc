@@ -146,7 +146,8 @@ TEST(NEOPMKVTEST, TimeStaticsTest) {
 
   NKV::NeoPMKV *neopmkv_ = nullptr;
   if (neopmkv_ == nullptr) {
-    neopmkv_ = new NKV::NeoPMKV(db_path, chunk_size, db_size, true);
+    neopmkv_ =
+        new NKV::NeoPMKV(db_path, chunk_size, db_size, true, false, 1ull << 14);
   }
   SchemaId sid = neopmkv_->createSchema(Fields, 0, "test1");
 
@@ -168,8 +169,9 @@ TEST(NEOPMKVTEST, TimeStaticsTest) {
     auto value = BuildValue(i);
     neopmkv_->put(key, value);
   }
-  uint32_t maxReadRounds = 5;
+  uint32_t maxReadRounds = 20;
   for (uint32_t round = 0; round < maxReadRounds; round++) {
+    NKV_LOG_I(std::cout, "========== Round {} ==========", round);
     for (uint64_t i = 0; i < length; i++) {
       auto key = BuildKey(i);
       auto expect_value = BuildValue(i);

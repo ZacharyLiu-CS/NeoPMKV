@@ -82,7 +82,20 @@ bool NeoPMKV::get(Key &key, std::string &value) {
     return false;
   }
   auto indexer = _indexerList[key.schemaId];
+
+#ifdef ENABLE_STATISTICS
+  PointProfiler _timer;
+  _timer.start();
+#endif
+
   IndexerIterator idxIter = indexer->find(key.primaryKey);
+
+#ifdef ENABLE_STATISTICS
+  _timer.end();
+  _durationStat.indexQueryCount.fetch_add(1);
+  _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
+#endif
+
   return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value);
 }
 
@@ -110,7 +123,19 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
   ValuePtr vPtr;
   vPtr.updatePmemAddr(pmAddr);
   // try to insert
+#ifdef ENABLE_STATISTICS
+  _timer.start();
+#endif
+
   auto [iter, status] = indexer->insert({key.primaryKey, vPtr});
+
+#ifdef ENABLE_STATISTICS
+  _timer.end();
+  _durationStat.indexInsertCount.fetch_add(1);
+  _durationStat.indexInsertTimeNanoSecs.fetch_add(_timer.duration());
+#endif
+
+
   // status is true means insert success, we don't have the kv before
   if (status == true) return true;
   // status is false means having the old kv
@@ -126,7 +151,19 @@ bool NeoPMKV::update(Key &key,
     return false;
   }
   auto indexer = _indexerList[key.schemaId];
+#ifdef ENABLE_STATISTICS
+  PointProfiler _timer;
+  _timer.start();
+#endif
+
   IndexerIterator idxIter = indexer->find(key.primaryKey);
+
+#ifdef ENABLE_STATISTICS
+  _timer.end();
+  _durationStat.indexQueryCount.fetch_add(1);
+  _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
+#endif
+
   if (idxIter == indexer->end()) return false;
   ValuePtr &vPtr = idxIter->second;
   PmemAddress pmemAddr = vPtr.getPmemAddr();
@@ -145,7 +182,20 @@ bool NeoPMKV::update(Key &key,
     return false;
   }
   auto indexer = _indexerList[key.schemaId];
+
+#ifdef ENABLE_STATISTICS
+  PointProfiler _timer;
+  _timer.start();
+#endif
+
   IndexerIterator idxIter = indexer->find(key.primaryKey);
+
+#ifdef ENABLE_STATISTICS
+  _timer.end();
+  _durationStat.indexQueryCount.fetch_add(1);
+  _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
+#endif
+
   if (idxIter == indexer->end()) return false;
   ValuePtr &vPtr = idxIter->second;
   PmemAddress pmemAddr = vPtr.getPmemAddr();
@@ -191,6 +241,20 @@ bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
 }
 #ifdef ENABLE_STATISTICS
 void NeoPMKV::outputReadStat() {
+  NKV_LOG_I(std::cout,
+            "Index: Query Count: {}, Total Time Cost: {:.2f} s, Average Time "
+            "Cost: {:.2f} ns",
+            _durationStat.indexQueryCount.load(),
+            _durationStat.indexQueryTimeNanoSecs.load() / (double)NANOSEC_BASE,
+            _durationStat.indexQueryTimeNanoSecs.load() /
+                (double)_durationStat.indexQueryCount.load());
+  NKV_LOG_I(std::cout,
+            "Index: insert Count: {}, Total Time Cost: {:.2f} s, Average Time "
+            "Cost: {:.2f} ns",
+            _durationStat.indexInsertCount.load(),
+            _durationStat.indexInsertTimeNanoSecs.load() / (double)NANOSEC_BASE,
+            _durationStat.indexInsertTimeNanoSecs.load() /
+                (double)_durationStat.indexInsertCount.load());
   NKV_LOG_I(std::cout,
             "PMem: Read Count: {}, Total Time Cost: {:.2f} s, Average Time "
             "Cost: {:.2f} ns",

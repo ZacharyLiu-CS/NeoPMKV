@@ -97,6 +97,12 @@ class NeoPMKV {
 #ifdef ENABLE_STATISTICS
   // Statistics:
   struct StatStruct {
+    std::atomic<uint64_t> indexQueryCount = {0};
+    std::atomic<uint64_t> indexQueryTimeNanoSecs = {0}; 
+
+    std::atomic<uint64_t> indexInsertCount = {0};
+    std::atomic<uint64_t> indexInsertTimeNanoSecs = {0};
+
     std::atomic<uint64_t> pmemReadCount = {0};
     std::atomic<uint64_t> pmemReadTimeNanoSecs = {0};
 

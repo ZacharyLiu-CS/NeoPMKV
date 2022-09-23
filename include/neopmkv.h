@@ -27,6 +27,7 @@ class NeoPMKV {
           bool enable_pbrb = false, bool async_pbrb = false,
           uint32_t maxPageNum = 1ull << 18) {
     _enable_pbrb = enable_pbrb;
+    _async_pbrb = async_pbrb;
 
     // initialize the pmemlog
     _engine_config.chunk_size = chunk_size;
@@ -41,7 +42,7 @@ class NeoPMKV {
       TimeStamp ts_start_pbrb;
       ts_start_pbrb.getNow();
       _pbrb = new PBRB(maxPageNum, &ts_start_pbrb, &_indexerList, &_sUMap, 60,
-                       5, async_pbrb);
+                       5, _async_pbrb);
     }
   }
   ~NeoPMKV() {
@@ -89,6 +90,7 @@ class NeoPMKV {
 
   // pbrb part
   bool _enable_pbrb = false;
+  bool _async_pbrb = false;
   PBRB *_pbrb = nullptr;
 
   PmemEngineConfig _engine_config;
@@ -98,7 +100,7 @@ class NeoPMKV {
   // Statistics:
   struct StatStruct {
     std::atomic<uint64_t> indexQueryCount = {0};
-    std::atomic<uint64_t> indexQueryTimeNanoSecs = {0}; 
+    std::atomic<uint64_t> indexQueryTimeNanoSecs = {0};
 
     std::atomic<uint64_t> indexInsertCount = {0};
     std::atomic<uint64_t> indexInsertTimeNanoSecs = {0};
@@ -108,6 +110,9 @@ class NeoPMKV {
 
     std::atomic<uint64_t> pmemWriteCount = {0};
     std::atomic<uint64_t> pmemWriteTimeNanoSecs = {0};
+
+    std::atomic<uint64_t> pmemUpdateCount = {0};
+    std::atomic<uint64_t> pmemUpdateTimeNanoSecs = {0};
 
     std::atomic<uint64_t> pbrbReadCount = {0};
     std::atomic<uint64_t> pbrbReadTimeNanoSecs = {0};

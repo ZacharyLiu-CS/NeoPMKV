@@ -108,7 +108,8 @@ class AsyncBufferQueue {
   }
 
   std::shared_ptr<AsyncBufferEntry> DequeueOneEntry() {
-    uint32_t accessing_offset = _dequeue_tail.fetch_add(1);
+    uint32_t accessing_offset =
+        _dequeue_tail.fetch_add(1, std::memory_order_relaxed);
 
     if (accessing_offset < _enqueue_head.load(std::memory_order_relaxed)) {
       return _queue_contents[accessing_offset % _queue_size];
@@ -116,8 +117,9 @@ class AsyncBufferQueue {
     _dequeue_tail.fetch_sub(1, std::memory_order_relaxed);
     return nullptr;
   }
-  bool IsEmpty() {
-    return _enqueue_head.load(std::memory_order_relaxed) > _dequeue_tail.load(std::memory_order_relaxed);
+  bool HasData() {
+    return _enqueue_head.load(std::memory_order_relaxed) >
+           _dequeue_tail.load(std::memory_order_relaxed);
   }
 };
 
@@ -327,7 +329,7 @@ class PBRB {
                  const Value &value, IndexerIterator iter);
   bool asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                   const Value &value, IndexerIterator iter);
-  void asyncWriteHandler(std::shared_ptr<AsyncBufferQueue> asyncBufferQueue);
+  void asyncWriteHandler();
 
  public:
   bool traverseIdxGC();

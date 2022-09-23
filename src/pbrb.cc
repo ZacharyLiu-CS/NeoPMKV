@@ -34,6 +34,8 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   for (int idx = 0; idx < maxPageNumber; idx++) {
     _freePageList.push_back(_bufferPoolPtr + idx);
   }
+  std::thread asyncThread(&PBRB::asyncWriteHandler, this);
+  asyncThread.detach();
 }
 
 PBRB::~PBRB() {
@@ -59,8 +61,6 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
     auto bufferQueue = std::make_shared<AsyncBufferQueue>(schemaId, schemaSize,
                                                           pbrbAsyncQueueSize);
     _asyncQueue.insert_or_assign(schemaId, bufferQueue);
-    std::thread asyncThread(&PBRB::asyncWriteHandler, this, bufferQueue);
-    asyncThread.detach();
   }
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = _freePageList.front();
@@ -387,15 +387,16 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
                 SchemaId schemaid, Value &value, ValuePtr *vPtr) {
   BufferPage *pagePtr = getPageAddr(addr);
-  BufferListBySchema &blbs = _bufferMap[schemaid];
-  value = pagePtr->getValueRow(addr, blbs.valueSize);
+
   // Validation:
   if (pagePtr->getTimestampRow(addr).gt(oldTS)) {
-    // Expired: Somebody updated the row.
+    // Expired: Somebody updated the asyncWriteHandlerrow.
     // TODO: Handle this case
-    NKV_LOG_E(std::cerr, "Expired Timestamp, Aborted.");
+    // NKV_LOG_E(std::cerr, "Expired Timestamp, Aborted.");
     return false;
   } else {
+    BufferListBySchema &blbs = _bufferMap[schemaid];
+    value = pagePtr->getValueRow(addr, blbs.valueSize);
     pagePtr->setTimestampRow(addr, newTS);
     vPtr->updateTS(newTS);
     NKV_LOG_D(
@@ -477,15 +478,17 @@ bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
   return _asyncQueue[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
 }
 
-void PBRB::asyncWriteHandler(
-    std::shared_ptr<AsyncBufferQueue> asyncBufferQueue) {
+void PBRB::asyncWriteHandler() {
   while (true) {
-    if (asyncBufferQueue->IsEmpty()) {
-      auto bufferEntry = asyncBufferQueue->DequeueOneEntry();
-      if (bufferEntry != nullptr) {
-        syncWrite(bufferEntry->_oldTS, bufferEntry->_newTS,
-                  asyncBufferQueue->getSchemaId(), bufferEntry->_entry_content,
-                  bufferEntry->_iter);
+    if(_asyncQueue.empty() == true) continue;
+    for (auto [id, asyncBuffer] : _asyncQueue) {
+      if (asyncBuffer->HasData()) {
+        auto bufferEntry = asyncBuffer->DequeueOneEntry();
+        if (bufferEntry != nullptr) {
+          syncWrite(bufferEntry->_oldTS, bufferEntry->_newTS,
+                    asyncBuffer->getSchemaId(), bufferEntry->_entry_content,
+                    bufferEntry->_iter);
+        }
       }
     }
     // std::this_thread::yield();

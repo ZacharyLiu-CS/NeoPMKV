@@ -7,14 +7,13 @@
 //
 
 #include "pbrb.h"
+#include <thread>
 
 namespace NKV {
-PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-           SchemaUMap *umap, uint64_t retentionWindowSecs,
-           uint32_t maxPageSearchNum, double targetOccupancyRatio) {
-  // check headerSizes
+  PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
+       SchemaUMap *umap, uint64_t retentionWindowSecs,
+       uint32_t maxPageSearchNum, bool async_pbrb, double targetOccupancyRatio, uint64_t gcIntervalus) {
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
-  static_assert(ROW_HEADER_SIZE == 28, "ROW_HEADER_SIZE != 28");
   // initialization
 
   _watermark = *wm;
@@ -23,6 +22,9 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   _indexListPtr = indexerListPtr;
   _maxPageSearchingNum = maxPageSearchNum;
   _retentionWindowSecs = retentionWindowSecs;
+  _async_pbrb = async_pbrb;
+  _gcIntervalus = std::chrono::microseconds(gcIntervalus);
+
 
   // allocate bufferpage
   auto aligned_val = std::align_val_t{_pageSize};
@@ -36,6 +38,8 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   _isGCRunning = true;
   int test = 0;
   _GCResult = std::async(std::launch::async, &PBRB::_asyncTraverseIdxGC, this);
+  std::thread asyncThread(&PBRB::asyncWriteHandler, this);
+  asyncThread.detach();
 }
 
 PBRB::~PBRB() {
@@ -55,6 +59,13 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
     NKV_LOG_E(std::cerr, "Cannot create cache for schema: {}! (no free page)",
               schemaId);
     return nullptr;
+  }
+
+  if (_async_pbrb == true) {
+    uint32_t schemaSize = _schemaUMap->find(schemaId)->getSize();
+    auto bufferQueue = std::make_shared<AsyncBufferQueue>(schemaId, schemaSize,
+                                                          pbrbAsyncQueueSize);
+    _asyncQueue.insert_or_assign(schemaId, bufferQueue);
   }
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = _freePageList.front();
@@ -250,7 +261,7 @@ inline RowOffset PBRB::findEmptySlotInPage(
   PointProfiler timer;
   timer.start();
 #endif
-  uint32_t result = pagePtr->getFirstZeroBit(blbs->maxRowCnt);
+uint32_t result = pagePtr->getFirstZeroBit(blbs->maxRowCnt);
 
 #ifdef ENABLE_BREAKDOWN
   timer.end();
@@ -396,6 +407,8 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
               newTS, value);
     return false;
   } else {
+    auto &blbs = _bufferMap[schemaid];
+    value = pagePtr->getValueRow(addr, blbs->valueSize);
     pagePtr->setTimestampRow(addr, newTS);
     vPtr->updateTS(newTS);
     NKV_LOG_D(
@@ -405,17 +418,24 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
     return true;
   }
 }
+bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+                 const Value &value, IndexerIterator iter) {
+  if (_bufferMap.find(schemaId) == _bufferMap.end()) {
+    NKV_LOG_I(
+        std::cout,
+        "A new schema (sid: {}) will be inserted into _bufferMap:", schemaId);
+    createCacheForSchema(schemaId);
+  }
+  if (_async_pbrb == true) {
+    return asyncWrite(oldTS, newTS, schemaId, value, iter);
+  }
+  return syncWrite(oldTS, newTS, schemaId, value, iter);
+}
 
-bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
+bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
                      const Value &value, IndexerIterator iter) {
   auto valuePtr = &iter->second;
 
-  if (_bufferMap.find(schemaid) == _bufferMap.end()) {
-    NKV_LOG_I(
-        std::cout,
-        "A new schema (sid: {}) will be inserted into _bufferMap:", schemaid);
-    createCacheForSchema(schemaid);
-  }
   // Check value size:
   auto &blbs = _bufferMap[schemaid];
   if (blbs->valueSize != value.size()) {
@@ -460,11 +480,32 @@ bool PBRB::syncwrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
   valuePtr->updatePBRBAddr(rowAddr, newTS);
   NKV_LOG_D(
       std::cout,
-      "PBRB: Successfully write row [ts: {}, value: {}, value.size(): {}]",
+      "PBRB: Successfully sync write row [ts: {}, value: {}, value.size(): {}]",
       oldTS, value, value.size());
   return true;
 }
 
+bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+                      const Value &value, IndexerIterator iter) {
+  return _asyncQueue[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
+}
+
+void PBRB::asyncWriteHandler() {
+  while (true) {
+    if (_asyncQueue.empty() == true) continue;
+    for (auto [id, asyncBuffer] : _asyncQueue) {
+      if (asyncBuffer->HasData()) {
+        auto bufferEntry = asyncBuffer->DequeueOneEntry();
+        if (bufferEntry != nullptr) {
+          syncWrite(bufferEntry->_oldTS, bufferEntry->_newTS,
+                    asyncBuffer->getSchemaId(), bufferEntry->_entry_content,
+                    bufferEntry->_iter);
+        }
+      }
+    }
+    std::this_thread::yield();
+  }
+}
 bool PBRB::dropRow(RowAddr rAddr) {
   auto [pagePtr, rowOffset] = findPageAndRowByAddr(rAddr);
   bool result = pagePtr->clearRowBitMapPage(rowOffset);
@@ -575,10 +616,9 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
 }
 
 bool PBRB::_asyncTraverseIdxGC() {
-  auto interval = std::chrono::milliseconds(20);
   while (_isGCRunning) {
     if (_checkOccupancyRatio(startGCOccupancyRatio)) {
-      std::this_thread::sleep_for(interval);
+      std::this_thread::sleep_for(_gcIntervalus);
       // std::this_thread::yield();
     } else {
       std::lock_guard<std::mutex> guard(traverseIdxGCLock_);

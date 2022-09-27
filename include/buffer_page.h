@@ -145,7 +145,7 @@ class BufferPage {
 
   // Row Struct:
   // CRC (4) | Timestamp (8) | PlogAddr (8) | KVNodeAddr(8)
-  // CRC:
+
   inline uint32_t getCRCRow();
   inline void setCRCRow();
 

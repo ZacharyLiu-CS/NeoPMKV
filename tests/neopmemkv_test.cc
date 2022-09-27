@@ -36,13 +36,13 @@ void cleanFile(std::string file_path) {
   }
   ASSERT_TRUE(status == true);
 }
-void PBRBTest(bool enablePBRB) {
+void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
   int res = system(clean_cmd.c_str());
   res = system(mkdir_cmd.c_str());
 
   NKV::NeoPMKV *neopmkv_ = nullptr;
   if (neopmkv_ == nullptr) {
-    neopmkv_ = new NKV::NeoPMKV(db_path, chunk_size, db_size, enablePBRB);
+    neopmkv_ = new NKV::NeoPMKV(db_path, chunk_size, db_size, enablePBRB, asyncPBRB);
   }
   SchemaId sid = neopmkv_->createSchema(Fields, 0, "test1");
 
@@ -135,8 +135,13 @@ TEST(NEOPMKVTEST, DisablePBRBTest) {
   cleanFile(db_path);
 }
 
-TEST(NEOPMKVTEST, EnablePBRBTest) {
-  PBRBTest(true);
+TEST(NEOPMKVTEST, SYNCPBRBTest) {
+  PBRBTest(true, false);
+  cleanFile(db_path);
+}
+
+TEST(NEOPMKVTEST, ASYNCPBRBTest) {
+  PBRBTest(true, true);
   cleanFile(db_path);
 }
 

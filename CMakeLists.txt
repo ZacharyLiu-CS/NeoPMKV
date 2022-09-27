@@ -36,6 +36,9 @@ find_package (TBB REQUIRED)
 
 # enable test
 option(BUILD_TESTS "Build test programs" ON)
+if(BUILD_TESTS)
+  message("Compile Tests")
+endif(BUILD_TESTS)
 #4. head file path
 include_directories(
   ${PROJECT_SOURCE_DIR}/include

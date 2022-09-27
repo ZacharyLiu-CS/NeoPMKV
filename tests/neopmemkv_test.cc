@@ -152,7 +152,7 @@ TEST(NEOPMKVTEST, TimeStaticsTest) {
   NKV::NeoPMKV *neopmkv_ = nullptr;
   if (neopmkv_ == nullptr) {
     neopmkv_ =
-        new NKV::NeoPMKV(db_path, chunk_size, db_size, true, false, 1ull << 14);
+        new NKV::NeoPMKV(db_path, chunk_size, db_size, true, false, true, 1ull << 14);
   }
   SchemaId sid = neopmkv_->createSchema(Fields, 0, "test1");
 

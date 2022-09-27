@@ -131,7 +131,9 @@ class PBRB {
   // constructor
   PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
        SchemaUMap *umap, uint64_t retentionWindowSecs = 60,
-       uint32_t maxPageSearchNum = 5, bool async_pbrb = false, double targetOccupancyRatio = 0.7, uint64_t gcIntervalus = 50000);
+       uint32_t maxPageSearchNum = 5, bool async_pbrb = false,
+       bool enable_async_gc = false, double targetOccupancyRatio = 0.7,
+       uint64_t gcIntervalus = 100000);
   // dtor
   ~PBRB();
 
@@ -186,6 +188,7 @@ class PBRB {
   TimeStamp _watermark;
 
   // GC
+  bool _enableAsyncGC = false;
   std::chrono::microseconds _gcIntervalus = std::chrono::microseconds(50000);
   uint64_t GCFailedTimes = 0;
   uint64_t _retentionWindowSecs = 60;  // 1 minute

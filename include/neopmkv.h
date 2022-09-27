@@ -24,7 +24,7 @@ class NeoPMKV {
  public:
   NeoPMKV(std::string db_path = "/mnt/pmem0/tmp-neopmkv",
           uint64_t chunk_size = 16ULL << 20, uint64_t db_size = 16ULL << 30,
-          bool enable_pbrb = false, bool async_pbrb = false,
+          bool enable_pbrb = false, bool async_pbrb = false, bool enable_async_gc = false,
           uint32_t maxPageNum = 1ull << 18) {
     _enable_pbrb = enable_pbrb;
     _async_pbrb = async_pbrb;
@@ -42,7 +42,7 @@ class NeoPMKV {
       TimeStamp ts_start_pbrb;
       ts_start_pbrb.getNow();
       _pbrb = new PBRB(maxPageNum, &ts_start_pbrb, &_indexerList, &_sUMap, 60,
-                       5, _async_pbrb);
+                       5, _async_pbrb, enable_async_gc, 0.7, 100000);
     }
   }
   ~NeoPMKV() {

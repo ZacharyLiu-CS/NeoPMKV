@@ -10,9 +10,10 @@
 #include <thread>
 
 namespace NKV {
-  PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-       SchemaUMap *umap, uint64_t retentionWindowSecs,
-       uint32_t maxPageSearchNum, bool async_pbrb, double targetOccupancyRatio, uint64_t gcIntervalus) {
+PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
+           SchemaUMap *umap, uint64_t retentionWindowSecs,
+           uint32_t maxPageSearchNum, bool async_pbrb, bool enable_async_gc,
+           double targetOccupancyRatio, uint64_t gcIntervalus) {
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
   // initialization
 
@@ -24,8 +25,7 @@ namespace NKV {
   _retentionWindowSecs = retentionWindowSecs;
   _async_pbrb = async_pbrb;
   _gcIntervalus = std::chrono::microseconds(gcIntervalus);
-
-
+  _enableAsyncGC = enable_async_gc;
   // allocate bufferpage
   auto aligned_val = std::align_val_t{_pageSize};
   _bufferPoolPtr = static_cast<BufferPage *>(operator new(
@@ -37,13 +37,16 @@ namespace NKV {
 
   _isGCRunning = true;
   int test = 0;
-  _GCResult = std::async(std::launch::async, &PBRB::_asyncTraverseIdxGC, this);
+  if (_enableAsyncGC) {
+    _GCResult =
+        std::async(std::launch::async, &PBRB::_asyncTraverseIdxGC, this);
+  }
   std::thread asyncThread(&PBRB::asyncWriteHandler, this);
   asyncThread.detach();
 }
 
 PBRB::~PBRB() {
-  _stopGC();
+  if (_enableAsyncGC) _stopGC();
   if (_bufferPoolPtr != nullptr) {
     delete _bufferPoolPtr;
   }
@@ -261,7 +264,7 @@ inline RowOffset PBRB::findEmptySlotInPage(
   PointProfiler timer;
   timer.start();
 #endif
-uint32_t result = pagePtr->getFirstZeroBit(blbs->maxRowCnt);
+  uint32_t result = pagePtr->getFirstZeroBit(blbs->maxRowCnt);
 
 #ifdef ENABLE_BREAKDOWN
   timer.end();

@@ -40,7 +40,7 @@ struct PageHeader {
   BufferPage *prevPagePtr = nullptr;
   BufferPage *nextpagePtr = nullptr;
   uint16_t howRowNum = 0;
-  char reserved[38]={'\0'};
+  char reserved[38] = {'\0'};
 } __attribute__((packed));
 
 struct RowHeader {
@@ -141,7 +141,6 @@ class BufferPage {
     memset(content + PAGE_HEADER_SIZE, 0, occuBitmapSize);
   }
 
-
   // 1.2 Row get & set functions.
 
   // Row Struct:
@@ -221,6 +220,7 @@ class BufferPage {
   void initializePage(uint32_t occuBitmapSize);
 
   friend class PBRB;
+  friend class BufferListBySchema;
 
   FRIEND_TEST(BufferPageTest, Initialization);
   FRIEND_TEST(BufferPageTest, BasicFunctions);

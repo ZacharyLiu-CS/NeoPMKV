@@ -41,39 +41,45 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     _durationStat.pbrbReadCount.fetch_add(1);
     _durationStat.pbrbReadTimeNanoSecs.fetch_add(_timer.duration());
 #endif
-
-  } else {
-    NKV_LOG_D(std::cout, "Read value from PLOG");
-    // Read PLog get a value
-
-#ifdef ENABLE_STATISTICS
-    PointProfiler _timer;
-    _timer.start();
-#endif
-    _engine_ptr->read(vPtr.getPmemAddr(), value);
-#ifdef ENABLE_STATISTICS
-    _timer.end();
-    _durationStat.pmemReadCount.fetch_add(1);
-    _durationStat.pmemReadTimeNanoSecs.fetch_add(_timer.duration());
-#endif
-    if (_enable_pbrb == false) {
+    if (status == true)
       return true;
+    else {
+      NKV_LOG_E(std::cerr, "key: {}, value: {}, ts: {}", idxIter->first, value,
+                idxIter->second.getTimestamp());
+      _pbrb->evictRow(idxIter);
+      assert(vPtr.isHot() == false);
     }
+  }
+  NKV_LOG_D(std::cout, "Read value from PLOG");
+  // Read PLog get a value
+
 #ifdef ENABLE_STATISTICS
-    _timer.start();
+  PointProfiler _timer;
+  _timer.start();
+#endif
+  _engine_ptr->read(vPtr.getPmemAddr(), value);
+#ifdef ENABLE_STATISTICS
+  _timer.end();
+  _durationStat.pmemReadCount.fetch_add(1);
+  _durationStat.pmemReadTimeNanoSecs.fetch_add(_timer.duration());
+#endif
+  if (_enable_pbrb == false) {
+    return true;
+  }
+#ifdef ENABLE_STATISTICS
+  _timer.start();
 #endif
 
-    TimeStamp tsInsert;
-    tsInsert.getNow();
-    _pbrb->schemaMiss(schemaid);
-    bool status =
-        _pbrb->write(vPtr.getTimestamp(), tsInsert, schemaid, value, idxIter);
+  TimeStamp tsInsert;
+  tsInsert.getNow();
+  _pbrb->schemaMiss(schemaid);
+  bool status =
+      _pbrb->write(vPtr.getTimestamp(), tsInsert, schemaid, value, idxIter);
 #ifdef ENABLE_STATISTICS
-    _timer.end();
-    _durationStat.pbrbWriteCount.fetch_add(1);
-    _durationStat.pbrbWriteTimeNanoSecs.fetch_add(_timer.duration());
+  _timer.end();
+  _durationStat.pbrbWriteCount.fetch_add(1);
+  _durationStat.pbrbWriteTimeNanoSecs.fetch_add(_timer.duration());
 #endif
-  }
   return true;
 }
 

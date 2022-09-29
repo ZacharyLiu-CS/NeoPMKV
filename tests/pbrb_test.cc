@@ -186,7 +186,7 @@ TEST(PBRBTest, Test02) {
   sUMap.addSchema(schema02);
 
   uint32_t length = 1 << 20;
-  uint32_t maxPageNum = 1 << 15;
+  uint32_t maxPageNum = 1 << 14;
   std::vector<Value> values;
   IndexerList indexerList;
   generateKV(length, values, indexerList);
@@ -299,7 +299,7 @@ TEST(PBRBTest, Test03) {
     timer.end();
     NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s (Sleeped {}s)", i + 1,
               timer.duration() / (double) NANOSEC_BASE, sleepTime[i]);
-    pbrb.traverseIdxGC();
+    // pbrb.traverseIdxGC();
   }
 #ifdef ENABLE_BREAKDOWN
   pbrb.analyzePerf();

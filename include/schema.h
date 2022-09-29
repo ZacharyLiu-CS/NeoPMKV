@@ -94,10 +94,19 @@ class ValuePtr {
 
   bool isHot() { return _isHot; }
 
-  void setIsHot(bool isHot) { _isHot = isHot; }
+  void setIsHot(bool isHot) {
+    std::lock_guard<std::mutex> lock(_updateLock);
+    _isHot = isHot;
+  }
 
-  void updateTS() { this->_timestamp.getNow(); }
-  void updateTS(TimeStamp newTS) { this->_timestamp = newTS; }
+  void updateTS() {
+    std::lock_guard<std::mutex> lock(_updateLock);
+    this->_timestamp.getNow();
+  }
+  void updateTS(TimeStamp newTS) {
+    std::lock_guard<std::mutex> lock(_updateLock);
+    this->_timestamp = newTS;
+  }
 
   void updatePmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
     std::lock_guard<std::mutex> lock(_updateLock);

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <oneapi/tbb/concurrent_map.h>
+#include <oneapi/tbb/concurrent_vector.h>
 #include <algorithm>
 #include <atomic>
 #include <bitset>
@@ -101,6 +102,8 @@ class AsyncBufferQueue {
         _dequeue_tail.load(std::memory_order_relaxed) + _queue_size) {
       _queue_contents[allocated_offset % _queue_size]->copyContent(oldTS, newTS,
                                                                    iter, value);
+
+      // NKV_LOG_I(std::cout, "Enqueue entry");
       return true;
     }
     _enqueue_head.fetch_sub(1, std::memory_order_relaxed);
@@ -112,13 +115,14 @@ class AsyncBufferQueue {
         _dequeue_tail.fetch_add(1, std::memory_order_relaxed);
 
     if (accessing_offset < _enqueue_head.load(std::memory_order_relaxed)) {
+      // NKV_LOG_I(std::cout, "Dequeue entry");
       return _queue_contents[accessing_offset % _queue_size];
     }
     _dequeue_tail.fetch_sub(1, std::memory_order_relaxed);
     return nullptr;
   }
-  bool HasData() {
-    return _enqueue_head.load(std::memory_order_relaxed) >
+  bool Empty() {
+    return _enqueue_head.load(std::memory_order_relaxed) <=
            _dequeue_tail.load(std::memory_order_relaxed);
   }
 };
@@ -178,7 +182,10 @@ class PBRB {
   std::map<SchemaId, BufferListBySchema> _bufferMap;
 
   bool _async_pbrb = false;
-  std::map<SchemaId, std::shared_ptr<AsyncBufferQueue>> _asyncQueue;
+  std::map<SchemaId, std::shared_ptr<AsyncBufferQueue>> _asyncQueueMap;
+
+  oneapi::tbb::concurrent_vector<std::shared_ptr<AsyncBufferQueue>> _asyncThreadPollList;
+  
 
   TimeStamp _watermark;
 
@@ -329,7 +336,7 @@ class PBRB {
                  const Value &value, IndexerIterator iter);
   bool asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                   const Value &value, IndexerIterator iter);
-  void asyncWriteHandler();
+  void asyncWriteHandler(decltype(&_asyncThreadPollList));
 
  public:
   bool traverseIdxGC();

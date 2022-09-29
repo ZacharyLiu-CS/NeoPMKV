@@ -8,6 +8,7 @@
 
 #include "pbrb.h"
 #include <thread>
+#include "logging.h"
 
 namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
@@ -34,8 +35,11 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   for (int idx = 0; idx < maxPageNumber; idx++) {
     _freePageList.push_back(_bufferPoolPtr + idx);
   }
-  std::thread asyncThread(&PBRB::asyncWriteHandler, this);
-  asyncThread.detach();
+  if (_async_pbrb == true) {
+    std::thread asyncThread(&PBRB::asyncWriteHandler, this,
+                            &_asyncThreadPollList);
+    asyncThread.detach();
+  }
 }
 
 PBRB::~PBRB() {
@@ -60,7 +64,9 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
     uint32_t schemaSize = _schemaUMap->find(schemaId)->getSize();
     auto bufferQueue = std::make_shared<AsyncBufferQueue>(schemaId, schemaSize,
                                                           pbrbAsyncQueueSize);
-    _asyncQueue.insert_or_assign(schemaId, bufferQueue);
+    _asyncQueueMap.insert({schemaId, bufferQueue});
+    _asyncThreadPollList.push_back(bufferQueue);
+    // NKV_LOG_I(std::cout, "async Queue size {}", _asyncQueue.size());
   }
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = _freePageList.front();
@@ -348,6 +354,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
       auto retVal = findPageAndRowByAddr(rowAddr);
       nextPagePtr = retVal.first;
       nextOff = retVal.second;
+      break;
     }
   }
 
@@ -460,7 +467,10 @@ bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
     // Rollback
     pagePtr->clearRowBitMapPage(rowOffset);
     blbs.curRowNum--;
-    NKV_LOG_D(std::cout, "PBRB: Write operation timestamp conflict. Rollback");
+    NKV_LOG_I(
+        std::cout,
+        "PBRB: Write [{}] operation timestamp conflict with hot {}. Rollback",
+        value, valuePtr->isHot());
     return false;
   }
 
@@ -475,14 +485,17 @@ bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
 
 bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                       const Value &value, IndexerIterator iter) {
-  return _asyncQueue[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
+  return _asyncQueueMap[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
 }
 
-void PBRB::asyncWriteHandler() {
+void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
   while (true) {
-    if(_asyncQueue.empty() == true) continue;
-    for (auto [id, asyncBuffer] : _asyncQueue) {
-      if (asyncBuffer->HasData()) {
+    if (pollList->empty() == true) {
+      std::this_thread::yield();
+      continue;
+    }
+    for (auto asyncBuffer : *pollList) {
+      if (!asyncBuffer->Empty()) {
         auto bufferEntry = asyncBuffer->DequeueOneEntry();
         if (bufferEntry != nullptr) {
           syncWrite(bufferEntry->_oldTS, bufferEntry->_newTS,
@@ -491,7 +504,7 @@ void PBRB::asyncWriteHandler() {
         }
       }
     }
-    // std::this_thread::yield();
+    std::this_thread::yield();
   }
 }
 bool PBRB::dropRow(RowAddr rAddr) {

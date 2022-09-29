@@ -36,10 +36,9 @@ struct OccupancyBitmap {
 struct PageHeader {
   uint16_t magic = 0;                 // 0 (2)
   SchemaId schemaId = 0;              // 2 (4)
-  SchemaVer schemaVer = 0;            // 6 (2)
-  BufferPage *prevPagePtr = nullptr;  // 8 (8)
-  BufferPage *nextpagePtr = nullptr;  // 16 (8)
-  uint16_t howRowNum = 0;             // 24 (2)
+  uint32_t howRowNum = 0;             // 6 (4)
+  BufferPage *prevPagePtr = nullptr;  // 10 (8)
+  BufferPage *nextpagePtr = nullptr;  // 18 (8)
   OccupancyBitmap occupancyBitmap;    // 26 (16)
   char reserved[22] = {'\0'};         // 42 (22)
 } __attribute__((packed));
@@ -48,7 +47,7 @@ struct RowHeader {
   char CRC[4];
   TimeStamp timestamp;
   PmemAddress pmemAddr;
-  ValuePtr *kvNodeAddr;
+  ValuePtr* kvNodeAddr;
 } __attribute__((packed));
 
 class BufferPage {
@@ -94,15 +93,6 @@ class BufferPage {
     return ((PageHeader *)content)->schemaId;
   }
 
-  // set (schemaVer, 6, 2)
-  inline void setSchemaVerPage(uint16_t schemaVer) {
-    ((PageHeader *)content)->schemaVer = schemaVer;
-  }
-
-  // get (schemaVer, 6, 2)
-  inline uint16_t getSchemaVerPage() {
-    return ((PageHeader *)content)->schemaVer;
-  }
 
   // get (prevPagePtr, 8, 8)
   inline void setPrevPage(BufferPage *prevPagePtr) {
@@ -125,12 +115,12 @@ class BufferPage {
   }
 
   // set (hotRowsNum, 24, 2)
-  inline void setHotRowsNumPage(uint16_t hotRowsNum) {
+  inline void setHotRowsNumPage(uint32_t hotRowsNum) {
     ((PageHeader *)content)->howRowNum = hotRowsNum;
   }
 
   // set (hotRowsNum, 24, 2)
-  inline uint16_t getHotRowsNumPage() {
+  inline uint32_t getHotRowsNumPage() {
     return ((PageHeader *)content)->howRowNum;
   }
 

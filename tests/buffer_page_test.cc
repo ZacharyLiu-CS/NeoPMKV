@@ -13,8 +13,6 @@ TEST(BufferPageTest, Initialization) {
   ASSERT_EQ(magic, 0x1010);
   auto schemaId = newPage->getSchemaIDPage();
   ASSERT_EQ(schemaId, 0);
-  auto schemaVer = newPage->getSchemaVerPage();
-  ASSERT_EQ(schemaVer, 0);
   auto prevPage = newPage->getPrevPage();
   ASSERT_EQ(prevPage, nullptr);
   auto nextPage = newPage->getNextPage();
@@ -34,8 +32,6 @@ TEST(BufferPageTest, BasicFunctions) {
   ASSERT_EQ(pagePtr->getMagicPage(), 3579);
   pagePtr->setSchemaIDPage(2468);
   ASSERT_EQ(pagePtr->getSchemaIDPage(), 2468);
-  pagePtr->setSchemaVerPage(1357);
-  ASSERT_EQ(pagePtr->getSchemaVerPage(), 1357);
   pagePtr->setHotRowsNumPage(187);
   ASSERT_EQ(pagePtr->getHotRowsNumPage(), 187);
 

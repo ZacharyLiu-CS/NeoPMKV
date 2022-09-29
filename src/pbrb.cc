@@ -47,7 +47,6 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
     _GCResult =
         std::async(std::launch::async, &PBRB::_asyncTraverseIdxGC, this);
   }
-
 }
 
 PBRB::~PBRB() {
@@ -99,7 +98,6 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
 
   pagePtr->initializePage();
   pagePtr->setSchemaIDPage(schemaId);
-  pagePtr->setSchemaVerPage(schemaVer);
 
   blbs->curPageNum++;
   _freePageList.pop_front();
@@ -142,7 +140,6 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     // Initialize Page.
     newPage->initializePage();
     newPage->setSchemaIDPage(schemaId);
-    newPage->setSchemaVerPage(blbs->ownSchema->version);
 
     // optimize: using tailPage.
     BufferPage *tail = blbs->tailPage;
@@ -204,7 +201,6 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
   // memset(newPage, 0, sizeof(BufferPage));
   newPage->initializePage();
   newPage->setSchemaIDPage(schemaId);
-  newPage->setSchemaVerPage(blbs->ownSchema->version);
 
   // insert behind pagePtr
   // pagePtr -> newPage -> nextPage;
@@ -501,7 +497,12 @@ bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
 
 bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                       const Value &value, IndexerIterator iter) {
-  return _asyncQueueMap[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
+  auto res =
+      _asyncQueueMap[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
+  if (res == false) {
+    NKV_LOG_I(std::cout, "Fail to insert to buffer queue");
+  }
+  return res;
 }
 
 void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
@@ -520,7 +521,7 @@ void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
         }
       }
     }
-    std::this_thread::yield();
+    // std::this_thread::yield();
   }
 }
 bool PBRB::dropRow(RowAddr rAddr) {

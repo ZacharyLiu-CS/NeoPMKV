@@ -48,10 +48,9 @@ void BufferPage::initializePage() {
   // memset(pagePtr, 0x00, sizeof(BufferPage));
   setMagicPage(0x1010);
   setSchemaIDPage(0);
-  setSchemaVerPage(0);
+  setHotRowsNumPage(0);
   setPrevPage(nullptr);
   setNextPage(nullptr);
-  setHotRowsNumPage(0);
   setReservedHeader();
 }
 

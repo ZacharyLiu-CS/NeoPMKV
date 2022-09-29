@@ -66,13 +66,15 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   if (_enable_pbrb == false) {
     return true;
   }
-#ifdef ENABLE_STATISTICS
-  _timer.start();
-#endif
+
 
   TimeStamp tsInsert;
   tsInsert.getNow();
   _pbrb->schemaMiss(schemaid);
+
+#ifdef ENABLE_STATISTICS
+  _timer.start();
+#endif
   bool status =
       _pbrb->write(vPtr.getTimestamp(), tsInsert, schemaid, value, idxIter);
 #ifdef ENABLE_STATISTICS

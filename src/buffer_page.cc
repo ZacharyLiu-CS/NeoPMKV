@@ -18,7 +18,7 @@ bool BufferPage::setRowBitMapPage(RowOffset rowOffset) {
   if (isBitmapSet(rowOffset)) return false;
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  content[PAGE_HEADER_SIZE + byteIndex] |= 0x1 << offset;
+  content[OCCUPANCY_BITMAP_OFFSET + byteIndex] |= 0x1 << offset;
   setHotRowsNumPage(getHotRowsNumPage() + 1);
   return true;
 }
@@ -27,7 +27,7 @@ bool BufferPage::clearRowBitMapPage(RowOffset rowOffset) {
   if (!isBitmapSet(rowOffset)) return false;
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  content[PAGE_HEADER_SIZE + byteIndex] &= ~(0x1 << offset);
+  content[OCCUPANCY_BITMAP_OFFSET + byteIndex] &= ~(0x1 << offset);
   setHotRowsNumPage(getHotRowsNumPage() - 1);
   return true;
 }
@@ -35,16 +35,16 @@ bool BufferPage::clearRowBitMapPage(RowOffset rowOffset) {
 bool BufferPage::isBitmapSet(RowOffset rowOffset) {
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  uint8_t bit = (content[PAGE_HEADER_SIZE + byteIndex] >> offset) & 1;
+  uint8_t bit = (content[OCCUPANCY_BITMAP_OFFSET + byteIndex] >> offset) & 1;
   if (bit)
     return true;
   else
     return false;
 }
-void BufferPage::initializePage(uint32_t occuBitmapSize) {
+void BufferPage::initializePage() {
   // Memset May Cause Performance Problems.
   // Optimized to just clear the header and occuBitMap
-  memset(content, 0, PAGE_HEADER_SIZE + occuBitmapSize);
+  memset(content, 0, PAGE_HEADER_SIZE);
   // memset(pagePtr, 0x00, sizeof(BufferPage));
   setMagicPage(0x1010);
   setSchemaIDPage(0);
@@ -77,7 +77,7 @@ RowOffset BufferPage::getFirstZeroBit(uint32_t maxRowNumOfPage,
     // Last Byte
     if (byteIdx == endByte) endBit = endOffset % 8;
 
-    uint8_t byteContent = content[PAGE_HEADER_SIZE + byteIdx];
+    uint8_t byteContent = content[OCCUPANCY_BITMAP_OFFSET + byteIdx];
     // Fix Byte
     uint8_t byteMask = ((1 << beginBit) - 1) | ~((1 << endBit) - 1);
     byteContent |= byteMask;

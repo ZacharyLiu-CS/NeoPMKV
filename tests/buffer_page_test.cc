@@ -8,7 +8,7 @@
 namespace NKV {
 TEST(BufferPageTest, Initialization) {
   BufferPage *newPage = new BufferPage();
-  newPage->initializePage(sizeof(OccupancyBitmap));
+  newPage->initializePage();
   auto magic = newPage->getMagicPage();
   ASSERT_EQ(magic, 0x1010);
   auto schemaId = newPage->getSchemaIDPage();
@@ -29,7 +29,7 @@ TEST(BufferPageTest, BasicFunctions) {
   BufferPage *nextPtr = new BufferPage();
   BufferPage *prevPtr = new BufferPage();
 
-  pagePtr->initializePage(sizeof(OccupancyBitmap));
+  pagePtr->initializePage();
   pagePtr->setMagicPage(3579);
   ASSERT_EQ(pagePtr->getMagicPage(), 3579);
   pagePtr->setSchemaIDPage(2468);
@@ -39,7 +39,7 @@ TEST(BufferPageTest, BasicFunctions) {
   pagePtr->setHotRowsNumPage(187);
   ASSERT_EQ(pagePtr->getHotRowsNumPage(), 187);
 
-  pagePtr->initializePage(sizeof(OccupancyBitmap));
+  pagePtr->initializePage();
   pagePtr->setPrevPage(prevPtr);
   ASSERT_EQ(pagePtr->getPrevPage(), prevPtr);
   pagePtr->setNextPage(nextPtr);
@@ -48,10 +48,10 @@ TEST(BufferPageTest, BasicFunctions) {
   uint32_t rowSize = 32;
   uint32_t valueSize = rowSize - ROW_HEADER_SIZE;
   uint32_t maxRowCnt =
-      (pageSize - PAGE_HEADER_SIZE - sizeof(OccupancyBitmap)) / rowSize;
+      (pageSize - PAGE_HEADER_SIZE) / rowSize;
 
   // Funtions: RowBitmap
-  ASSERT_EQ(125, maxRowCnt);
+  ASSERT_EQ(126, maxRowCnt);
   ASSERT_EQ(pagePtr->getFirstZeroBit(maxRowCnt, 0, 8), 0);  // 00000000
   pagePtr->setRowBitMapPage(0);                             // 00000001
   ASSERT_EQ(pagePtr->isBitmapSet(0), true);
@@ -76,12 +76,14 @@ TEST(BufferPageTest, BasicFunctions) {
   ASSERT_EQ(pagePtr->getFirstZeroBit(maxRowCnt, 120), 124);
   ASSERT_EQ(pagePtr->getFirstZeroBit(maxRowCnt, 120, 130), 124);
   pagePtr->setRowBitMapPage(124);
+  pagePtr->setRowBitMapPage(125);
+
   ASSERT_EQ(pagePtr->getFirstZeroBit(maxRowCnt, 120), UINT32_MAX);
   ASSERT_EQ(pagePtr->getFirstZeroBit(maxRowCnt, 120, 130), UINT32_MAX);
 
   // verify hot row count:
-  ASSERT_EQ(pagePtr->getHotRowsNumPage(), 7);
-  // 0, 3, 120, 121, 122, 123, 124 is set.
+  ASSERT_EQ(pagePtr->getHotRowsNumPage(), 8);
+  // 0, 3, 120, 121, 122, 123, 124, 125 is set.
 
   // Row header functions:
   RowOffset rOff;

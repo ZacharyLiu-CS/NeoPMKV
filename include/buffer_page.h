@@ -18,7 +18,7 @@
 
 #define PAGE_HEADER_SIZE sizeof(PageHeader)
 #define ROW_HEADER_SIZE sizeof(RowHeader)
-#define OCCUPANCY_BITMAP_SIZE sizeof(OccupancyBitmap)
+#define OCCUPANCY_BITMAP_OFFSET 26
 namespace NKV {
 constexpr int pageSize = 4 * 1024;  // 4KB
 
@@ -34,13 +34,14 @@ struct OccupancyBitmap {
 } __attribute__((packed));
 
 struct PageHeader {
-  uint16_t magic = 0;
-  SchemaId schemaId = 0;
-  SchemaVer schemaVer = 0;
-  BufferPage *prevPagePtr = nullptr;
-  BufferPage *nextpagePtr = nullptr;
-  uint16_t howRowNum = 0;
-  char reserved[38] = {'\0'};
+  uint16_t magic = 0;                 // 0 (2)
+  SchemaId schemaId = 0;              // 2 (4)
+  SchemaVer schemaVer = 0;            // 6 (2)
+  BufferPage *prevPagePtr = nullptr;  // 8 (8)
+  BufferPage *nextpagePtr = nullptr;  // 16 (8)
+  uint16_t howRowNum = 0;             // 24 (2)
+  OccupancyBitmap occupancyBitmap;    // 26 (16)
+  char reserved[22] = {'\0'};         // 42 (22)
 } __attribute__((packed));
 
 struct RowHeader {
@@ -133,12 +134,12 @@ class BufferPage {
     return ((PageHeader *)content)->howRowNum;
   }
 
-  inline void setReservedHeader() {  // reserved is 38 bytes
-    memset(((PageHeader *)content)->reserved, 0, 38);
+  inline void setReservedHeader() {  // reserved is 22 bytes
+    memset(((PageHeader *)content)->reserved, 0, 22);
   }
 
   inline void clearPageBitMap(uint32_t occuBitmapSize) {
-    memset(content + PAGE_HEADER_SIZE, 0, occuBitmapSize);
+    memset(content + OCCUPANCY_BITMAP_OFFSET, 0, occuBitmapSize);
   }
 
   // 1.2 Row get & set functions.
@@ -196,8 +197,7 @@ class BufferPage {
 
   // test helper function: get rAddr by rowOffset:
   inline RowAddr _getRowAddr(RowOffset rowOffset, uint32_t rowSize) {
-    return (RowAddr)(content + PAGE_HEADER_SIZE + OCCUPANCY_BITMAP_SIZE +
-                     rowSize * rowOffset);
+    return (RowAddr)(content + PAGE_HEADER_SIZE + rowSize * rowOffset);
   }
   // 2. Occupancy Bitmap functions.
 
@@ -217,7 +217,7 @@ class BufferPage {
   // 3. Operations.
   // 3.1 Initialize a schema.
 
-  void initializePage(uint32_t occuBitmapSize);
+  void initializePage();
 
   friend class PBRB;
   friend class BufferListBySchema;

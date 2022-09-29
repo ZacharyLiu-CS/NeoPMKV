@@ -88,6 +88,14 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
     neopmkv_->get(key, read_value);
     ASSERT_EQ(read_value, expect_value);
   }
+  // Add a get round (read from PBRB)
+  for (uint64_t i = 0; i < length; i++) {
+    auto key = BuildKey(i);
+    auto expect_value = BuildValue(i);
+    Value read_value;
+    neopmkv_->get(key, read_value);
+    ASSERT_EQ(read_value, expect_value);
+  }
   // test the update correctness
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);

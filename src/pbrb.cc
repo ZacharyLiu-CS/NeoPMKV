@@ -90,7 +90,7 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   // Initialize Page.
   // memset(pagePtr, 0, sizeof(BufferPage));
 
-  pagePtr->initializePage(blbs->occuBitmapSize);
+  pagePtr->initializePage();
   pagePtr->setSchemaIDPage(schemaId);
   pagePtr->setSchemaVerPage(schemaVer);
 
@@ -133,7 +133,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     BufferPage *newPage = _freePageList.front();
 
     // Initialize Page.
-    newPage->initializePage(blbs->occuBitmapSize);
+    newPage->initializePage();
     newPage->setSchemaIDPage(schemaId);
     newPage->setSchemaVerPage(blbs->ownSchema->version);
 
@@ -195,7 +195,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
 
   // Initialize Page.
   // memset(newPage, 0, sizeof(BufferPage));
-  newPage->initializePage(blbs->occuBitmapSize);
+  newPage->initializePage();
   newPage->setSchemaIDPage(schemaId);
   newPage->setSchemaVerPage(blbs->ownSchema->version);
 

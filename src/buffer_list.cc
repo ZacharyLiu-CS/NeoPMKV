@@ -27,17 +27,17 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
   ownSchema = res;
   setOccuBitmapSize(pageSize);
 
-  firstRowOffset = rowHeaderSize;
+  firstRowOffset = 0;
   valueSize = ownSchema->getSize();
   // set rowSize
   // rowSize = currRowOffset (align to 8 bytes)
-  rowSize = ((valueSize + firstRowOffset - 1) / 8 + 1) * 8;
+  rowSize = ((valueSize + rowHeaderSize - 1) / 8 + 1) * 8;
 
   NKV_LOG_D(std::cout,
             "PageHeaderSize: {}, OccupancyBitmapSize: {}, RowSize: {}",
             pageHeaderSize, occuBitmapSize, rowSize);
   setOccuBitmapSize(pageSize);
-  maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
+  maxRowCnt = (pageSize - pageHeaderSize) / rowSize;
 }
 
 bool BufferListBySchema::reclaimPage(std::list<BufferPage *> &freePageList,

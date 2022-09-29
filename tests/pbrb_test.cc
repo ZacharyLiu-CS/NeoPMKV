@@ -193,7 +193,7 @@ TEST(PBRBTest, Test02) {
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
-  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false);
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false, true, 0.7, 50000);
 
   auto &indexer = indexerList[1];
   // Cache all KVs

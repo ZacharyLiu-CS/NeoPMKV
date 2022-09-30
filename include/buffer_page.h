@@ -18,7 +18,7 @@
 
 #define PAGE_HEADER_SIZE sizeof(PageHeader)
 #define ROW_HEADER_SIZE sizeof(RowHeader)
-#define OCCUPANCY_BITMAP_OFFSET 26
+
 namespace NKV {
 constexpr int pageSize = 4 * 1024;  // 4KB
 
@@ -129,7 +129,7 @@ class BufferPage {
   }
 
   inline void clearPageBitMap(uint32_t occuBitmapSize) {
-    memset(content + OCCUPANCY_BITMAP_OFFSET, 0, occuBitmapSize);
+    memset(&((PageHeader *)content)->occupancyBitmap, 0, occuBitmapSize);
   }
 
   // 1.2 Row get & set functions.

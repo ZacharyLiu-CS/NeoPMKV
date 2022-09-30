@@ -11,14 +11,11 @@
 #include "logging.h"
 namespace NKV {
 
-
-
-
 bool BufferPage::setRowBitMapPage(RowOffset rowOffset) {
   if (isBitmapSet(rowOffset)) return false;
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  content[OCCUPANCY_BITMAP_OFFSET + byteIndex] |= 0x1 << offset;
+  ((PageHeader *)content)->occupancyBitmap.bitmap[byteIndex] |= 0x1 << offset;
   setHotRowsNumPage(getHotRowsNumPage() + 1);
   return true;
 }
@@ -27,7 +24,8 @@ bool BufferPage::clearRowBitMapPage(RowOffset rowOffset) {
   if (!isBitmapSet(rowOffset)) return false;
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  content[OCCUPANCY_BITMAP_OFFSET + byteIndex] &= ~(0x1 << offset);
+  ((PageHeader *)content)->occupancyBitmap.bitmap[byteIndex] &=
+      ~(0x1 << offset);
   setHotRowsNumPage(getHotRowsNumPage() - 1);
   return true;
 }
@@ -35,7 +33,9 @@ bool BufferPage::clearRowBitMapPage(RowOffset rowOffset) {
 bool BufferPage::isBitmapSet(RowOffset rowOffset) {
   uint32_t byteIndex = rowOffset / 8;
   uint32_t offset = rowOffset % 8;
-  uint8_t bit = (content[OCCUPANCY_BITMAP_OFFSET + byteIndex] >> offset) & 1;
+  uint8_t bit =
+      (((PageHeader *)content)->occupancyBitmap.bitmap[byteIndex] >> offset) &
+      1;
   if (bit)
     return true;
   else
@@ -76,7 +76,7 @@ RowOffset BufferPage::getFirstZeroBit(uint32_t maxRowNumOfPage,
     // Last Byte
     if (byteIdx == endByte) endBit = endOffset % 8;
 
-    uint8_t byteContent = content[OCCUPANCY_BITMAP_OFFSET + byteIdx];
+    uint8_t byteContent = ((PageHeader *)content)->occupancyBitmap.bitmap[byteIdx];
     // Fix Byte
     uint8_t byteMask = ((1 << beginBit) - 1) | ~((1 << endBit) - 1);
     byteContent |= byteMask;
@@ -84,8 +84,9 @@ RowOffset BufferPage::getFirstZeroBit(uint32_t maxRowNumOfPage,
               byteMask, byteContent);
     if (byteContent != UINT8_MAX)
       for (uint8_t bitIdx = beginBit; bitIdx < endBit; bitIdx++)
-        if (((byteContent >> bitIdx) & (uint8_t)1) == 0)
+        if (((byteContent >> bitIdx) & (uint8_t)1) == 0) {
           return byteIdx * 8 + bitIdx;
+        }
   }
 
   return UINT32_MAX;

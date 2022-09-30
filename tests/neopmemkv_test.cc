@@ -103,6 +103,7 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
     }
     // ASSERT_EQ(read_value, expect_value);
   }
+  /*
   // test the update correctness
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
@@ -147,6 +148,7 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
               i + remove_length, expect_value, value_list[i]);
     ASSERT_EQ(expect_value, value_list[i]);
   }
+  */
   delete neopmkv_;
 }
 TEST(NEOPMKVTEST, DisablePBRBTest) {

@@ -7,6 +7,7 @@
 //
 
 #include "pbrb.h"
+#include <atomic>
 #include <thread>
 #include "logging.h"
 
@@ -36,20 +37,20 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
     _freePageList.push_back(_bufferPoolPtr + idx);
   }
   if (_async_pbrb == true) {
-    std::thread asyncThread(&PBRB::asyncWriteHandler, this,
-                            &_asyncThreadPollList);
-    asyncThread.detach();
+    _asyncThread =
+        std::thread(&PBRB::asyncWriteHandler, this, &_asyncThreadPollList);
+    _asyncThread.detach();
   }
 
-  _isGCRunning = true;
-
   if (_asyncGC == true) {
+    _isGCRunning.store(true, std::memory_order_relaxed);
     _GCResult =
         std::async(std::launch::async, &PBRB::_asyncTraverseIdxGC, this);
   }
 }
 
 PBRB::~PBRB() {
+  _isAsyncRunning.store(false, std::memory_order_relaxed);
   if (_asyncGC) _stopGC();
   if (_bufferPoolPtr != nullptr) {
     delete _bufferPoolPtr;
@@ -74,6 +75,7 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
                                                           pbrbAsyncQueueSize);
     _asyncQueueMap.insert({schemaId, bufferQueue});
     _asyncThreadPollList.push_back(bufferQueue);
+    _isAsyncRunning.store(true, std::memory_order_relaxed);
     // NKV_LOG_I(std::cout, "async Queue size {}", _asyncQueue.size());
   }
   // Get a page and set schemaMetadata.
@@ -500,13 +502,17 @@ bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
   auto res =
       _asyncQueueMap[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
   if (res == false) {
-    NKV_LOG_I(std::cout, "Fail to insert to buffer queue");
+    NKV_LOG_I(std::cout, "Fail to insert {} to buffer queue", value);
   }
   return res;
 }
 
 void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
-  while (true) {
+  while(true){
+    if (_isAsyncRunning.load(std::memory_order_relaxed))
+    break;
+  }
+  while (_isAsyncRunning.load(std::memory_order_relaxed)) {
     if (pollList->empty() == true) {
       std::this_thread::yield();
       continue;
@@ -634,7 +640,7 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
 }
 
 bool PBRB::_asyncTraverseIdxGC() {
-  while (_isGCRunning) {
+  while (_isGCRunning.load(std::memory_order_relaxed)) {
     if (_checkOccupancyRatio(startGCOccupancyRatio)) {
       std::this_thread::sleep_for(_gcIntervalus);
       // std::this_thread::yield();
@@ -647,7 +653,7 @@ bool PBRB::_asyncTraverseIdxGC() {
 }
 
 void PBRB::_stopGC() {
-  _isGCRunning = false;
+  _isGCRunning.store(false, std::memory_order_relaxed);
   _GCResult.wait();
   if (_GCResult.get() == true)
     NKV_LOG_I(std::cout, "Successfully stopped _asyncGC.");

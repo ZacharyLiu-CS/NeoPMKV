@@ -47,7 +47,7 @@ struct RowHeader {
   char CRC[4];
   TimeStamp timestamp;
   PmemAddress pmemAddr;
-  ValuePtr* kvNodeAddr;
+  ValuePtr *kvNodeAddr;
 } __attribute__((packed));
 
 class BufferPage {
@@ -92,7 +92,6 @@ class BufferPage {
   inline SchemaId getSchemaIDPage() {
     return ((PageHeader *)content)->schemaId;
   }
-
 
   // get (prevPagePtr, 8, 8)
   inline void setPrevPage(BufferPage *prevPagePtr) {
@@ -165,10 +164,10 @@ class BufferPage {
   }
 
   // Value:
-  inline Value getValueRow(RowAddr rAddr, uint32_t valueSize) {
+  inline void getValueRow(RowAddr rAddr, uint32_t valueSize, Value &value) {
     char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
-    std::string value = std::string(valueAddr, valueSize);
-    return value;
+    value.resize(valueSize);
+    memcpy(value.data(), valueAddr, valueSize);
   }
 
   // need to

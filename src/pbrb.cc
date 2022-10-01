@@ -403,29 +403,15 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
                 SchemaId schemaid, Value &value, ValuePtr *vPtr) {
   BufferPage *pagePtr = getPageAddr(addr);
   auto &blbs = _bufferMap[schemaid];
-  value = pagePtr->getValueRow(addr, blbs->valueSize);
-  // Validation:
-  if (pagePtr->getTimestampRow(addr).ne(oldTS)) {
-    // Expired: Somebody updated the row.
-    // TODO: Handle this case
-    NKV_LOG_E(std::cerr, "Expired Timestamp, Aborted.");
-    NKV_LOG_E(std::cerr,
-              "Detail: [oldTS: {}, vPtr->timestamp: {}, rowTS: {}, readNewTS: "
-              "{}, value: {}]",
-              oldTS, vPtr->getTimestamp(), pagePtr->getTimestampRow(addr),
-              newTS, value);
+  if (vPtr->setHotTimeStamp(oldTS, newTS) == false) {
     return false;
-  } else {
-    auto &blbs = _bufferMap[schemaid];
-    value = pagePtr->getValueRow(addr, blbs->valueSize);
-    pagePtr->setTimestampRow(addr, newTS);
-    vPtr->updateTS(newTS);
-    NKV_LOG_D(
-        std::cout,
-        "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
-        oldTS, value, value.size());
-    return true;
   }
+  pagePtr->setTimestampRow(addr, newTS);
+  pagePtr->getValueRow(addr, blbs->valueSize, value);
+  NKV_LOG_D(std::cout,
+            "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
+            oldTS, value, value.size());
+  return true;
 }
 bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                  const Value &value, IndexerIterator iter) {
@@ -465,35 +451,27 @@ bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
 
   // 3. copy row.
   // copy header:
-  {
-    std::lock_guard<std::mutex> lockGuard(writeLock_);
-    pagePtr->setTimestampRow(rowAddr, newTS);
-    pagePtr->setPlogAddrRow(rowAddr, valuePtr->getPmemAddr());
-    pagePtr->setKVNodeAddrRow(rowAddr, valuePtr);
-    // copy row content:
-    pagePtr->setValueRow(rowAddr, value, blbs->valueSize);
-    pagePtr->setRowBitMapPage(rowOffset);
-    blbs->curRowNum++;
-  }
 
-  // 4. Check consistency
-  if (valuePtr->getTimestamp().ne(oldTS)) {
+  pagePtr->setTimestampRow(rowAddr, newTS);
+  pagePtr->setPlogAddrRow(rowAddr, valuePtr->getPmemAddr());
+  pagePtr->setKVNodeAddrRow(rowAddr, valuePtr);
+  // copy row content:
+  pagePtr->setValueRow(rowAddr, value, blbs->valueSize);
+  pagePtr->setRowBitMapPage(rowOffset);
+  blbs->curRowNum++;
+
+  // 4. Check consistency && Update ValuePtr
+  if (valuePtr->setHotPBRBAddr(rowAddr, oldTS, newTS) == false) {
     // Rollback
     pagePtr->clearRowBitMapPage(rowOffset);
     blbs->curRowNum--;
-    NKV_LOG_I(
-        std::cout,
-        "PBRB: Write [{}] operation timestamp conflict with hot {}. Rollback",
-        value, valuePtr->isHot());
+    NKV_LOG_I(std::cout,
+              "PBRB: Write [{}] operation timestamp [{}->{}] conflict with hot "
+              "{}. Rollback",
+              valuePtr->getTimestamp(), oldTS, value, valuePtr->isHot());
     return false;
   }
 
-  // 5. Update ValuePtr
-  valuePtr->updatePBRBAddr(rowAddr, newTS);
-  NKV_LOG_D(
-      std::cout,
-      "PBRB: Successfully sync write row [ts: {}, value: {}, value.size(): {}]",
-      oldTS, value, value.size());
   return true;
 }
 
@@ -508,16 +486,12 @@ bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
 }
 
 void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
-  while(true){
-    if (_isAsyncRunning.load(std::memory_order_relaxed))
-    break;
+  // first sleep to wait for create schema to trigger
+  while (true) {
+    if (_isAsyncRunning.load(std::memory_order_relaxed)) break;
   }
   while (_isAsyncRunning.load(std::memory_order_relaxed)) {
-    if (pollList->empty() == true) {
-      std::this_thread::yield();
-      continue;
-    }
-    for (auto asyncBuffer : *pollList) {
+    for (auto &asyncBuffer : *pollList) {
       if (!asyncBuffer->Empty()) {
         auto bufferEntry = asyncBuffer->DequeueOneEntry();
         if (bufferEntry != nullptr) {
@@ -545,7 +519,7 @@ bool PBRB::dropRow(RowAddr rAddr) {
 
 bool PBRB::evictRow(IndexerIterator &iter) {
   RowAddr rAddr = iter->second.getPBRBAddr();
-  iter->second.setIsHot(false);
+  iter->second.evictToCold();
   if (dropRow(rAddr) == false) return false;
   _evictCnt++;
   return true;

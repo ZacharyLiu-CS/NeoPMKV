@@ -14,6 +14,7 @@
 #include "pbrb.h"
 #include "profiler.h"
 #include "schema.h"
+#include "timestamp.h"
 
 namespace NKV {
 bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
@@ -23,36 +24,29 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     return false;
   }
   ValuePtr &vPtr = idxIter->second;
+  auto [hotStatus, oldTS] = vPtr.getHotStatus();
 
-  if (vPtr.isHot()) {
+  // read from pbrb
+  if (hotStatus == true) {
     NKV_LOG_D(std::cout, "Read value from PBRB");
     _pbrb->schemaHit(schemaid);
     // Read PBRB
-    TimeStamp tsRead;
-    tsRead.getNow();
+    TimeStamp newTS;
+    newTS.getNow();
 #ifdef ENABLE_STATISTICS
     PointProfiler _timer;
     _timer.start();
 #endif
-    bool status = _pbrb->read(vPtr.getTimestamp(), tsRead, vPtr.getPBRBAddr(),
-                              schemaid, value, &vPtr);
+    bool status = _pbrb->read(oldTS, newTS,vPtr.getPBRBAddr(), schemaid, value, &vPtr);
 #ifdef ENABLE_STATISTICS
     _timer.end();
     _durationStat.pbrbReadCount.fetch_add(1);
     _durationStat.pbrbReadTimeNanoSecs.fetch_add(_timer.duration());
 #endif
-    if (status == true)
-      return true;
-    else {
-      NKV_LOG_E(std::cerr, "key: {}, value: {}, ts: {}", idxIter->first, value,
-                idxIter->second.getTimestamp());
-      _pbrb->evictRow(idxIter);
-      assert(vPtr.isHot() == false);
-    }
+    return true;
   }
-  NKV_LOG_D(std::cout, "Read value from PLOG");
-  // Read PLog get a value
 
+  // Read PLog get a value
 #ifdef ENABLE_STATISTICS
   PointProfiler _timer;
   _timer.start();
@@ -66,17 +60,14 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   if (_enable_pbrb == false) {
     return true;
   }
-
-
-  TimeStamp tsInsert;
-  tsInsert.getNow();
+  TimeStamp newTs;
+  newTs.getNow();
   _pbrb->schemaMiss(schemaid);
 
 #ifdef ENABLE_STATISTICS
   _timer.start();
 #endif
-  bool status =
-      _pbrb->write(vPtr.getTimestamp(), tsInsert, schemaid, value, idxIter);
+  bool status = _pbrb->write(oldTS, newTs, schemaid, value, idxIter);
 #ifdef ENABLE_STATISTICS
   _timer.end();
   _durationStat.pbrbWriteCount.fetch_add(1);
@@ -103,7 +94,8 @@ bool NeoPMKV::get(Key &key, std::string &value) {
   _durationStat.indexQueryCount.fetch_add(1);
   _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
 #endif
-
+  NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
+            idxIter->second);
   return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value);
 }
 
@@ -128,8 +120,10 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
 #endif
 
   if (!s.is2xxOK()) return false;
-  ValuePtr vPtr;
-  vPtr.updatePmemAddr(pmAddr);
+  TimeStamp putTs;
+  putTs.getNow();
+  ValuePtr vPtr(pmAddr, putTs);
+
   // try to insert
 #ifdef ENABLE_STATISTICS
   _timer.start();
@@ -142,14 +136,15 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
   _durationStat.indexInsertCount.fetch_add(1);
   _durationStat.indexInsertTimeNanoSecs.fetch_add(_timer.duration());
 #endif
-
+  NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value, vPtr);
   // status is true means insert success, we don't have the kv before
   if (status == true) return true;
   // status is false means having the old kv
   if (_enable_pbrb == true && iter->second.isHot() == true) {
     _pbrb->dropRow(iter->second.getPBRBAddr());
   }
-  iter->second.updatePmemAddr(pmAddr);
+  iter->second.setColdPmemAddr(pmAddr, putTs);
+
   return true;
 }
 bool NeoPMKV::update(Key &key,
@@ -174,6 +169,8 @@ bool NeoPMKV::update(Key &key,
   if (idxIter == indexer->end()) return false;
   ValuePtr &vPtr = idxIter->second;
   PmemAddress pmemAddr = vPtr.getPmemAddr();
+  TimeStamp updatetTs;
+  updatetTs.getNow();
 
 #ifdef ENABLE_STATISTICS
   _timer.start();
@@ -189,7 +186,7 @@ bool NeoPMKV::update(Key &key,
   _durationStat.pmemUpdateTimeNanoSecs.fetch_add(_timer.duration());
 #endif
 
-  vPtr.updatePmemAddr(pmemAddr);
+  vPtr.setColdPmemAddr(pmemAddr, updatetTs);
   return true;
 }
 bool NeoPMKV::update(Key &key,
@@ -215,6 +212,8 @@ bool NeoPMKV::update(Key &key,
   if (idxIter == indexer->end()) return false;
   ValuePtr &vPtr = idxIter->second;
   PmemAddress pmemAddr = vPtr.getPmemAddr();
+  TimeStamp updatetTs;
+  updatetTs.getNow();
 
 #ifdef ENABLE_STATISTICS
   _timer.start();
@@ -231,7 +230,7 @@ bool NeoPMKV::update(Key &key,
   _durationStat.pmemUpdateTimeNanoSecs.fetch_add(_timer.duration());
 #endif
 
-  vPtr.updatePmemAddr(pmemAddr);
+  vPtr.setColdPmemAddr(pmemAddr, updatetTs);
   return true;
 }
 bool NeoPMKV::remove(Key &key) {

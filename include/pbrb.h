@@ -90,8 +90,8 @@ class AsyncBufferQueue {
       : _schema_id(schema_id),
         _schema_size(schema_size),
         _queue_size(queue_size) {
-    _enqueue_head.store(0,std::memory_order_relaxed);
-    _dequeue_tail.store(0,std::memory_order_relaxed);
+    _enqueue_head.store(0, std::memory_order_relaxed);
+    _dequeue_tail.store(0, std::memory_order_relaxed);
     _queue_contents.resize(queue_size);
     for (auto i = 0; i < queue_size; i++) {
       _queue_contents[i] = std::make_shared<AsyncBufferEntry>(schema_size);
@@ -191,7 +191,7 @@ class PBRB {
   bool _async_pbrb = false;
   std::map<SchemaId, std::shared_ptr<AsyncBufferQueue>> _asyncQueueMap;
 
-  oneapi::tbb::concurrent_vector<std::shared_ptr<AsyncBufferQueue>> _asyncThreadPollList;
+  std::vector<std::shared_ptr<AsyncBufferQueue>> _asyncThreadPollList;
   std::thread _asyncThread;
   std::atomic_bool _isAsyncRunning{false};
 
@@ -380,7 +380,6 @@ class PBRB {
 
  private:
   std::future<bool> _GCResult;
-  std::mutex writeLock_;
   std::mutex traverseIdxGCLock_;
   // GC
  private:

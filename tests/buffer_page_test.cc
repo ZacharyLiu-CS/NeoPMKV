@@ -43,8 +43,7 @@ TEST(BufferPageTest, BasicFunctions) {
 
   uint32_t rowSize = 32;
   uint32_t valueSize = rowSize - ROW_HEADER_SIZE;
-  uint32_t maxRowCnt =
-      (pageSize - PAGE_HEADER_SIZE) / rowSize;
+  uint32_t maxRowCnt = (pageSize - PAGE_HEADER_SIZE) / rowSize;
 
   // Funtions: RowBitmap
   ASSERT_EQ(126, maxRowCnt);
@@ -102,13 +101,17 @@ TEST(BufferPageTest, BasicFunctions) {
 
   std::string row01("r001", 4);
   ASSERT_EQ(valueSize, row01.size());
+  std::string val01;
   ASSERT_EQ(pagePtr->setValueRow(rAddr, row01, valueSize), true);
-  ASSERT_EQ(pagePtr->getValueRow(rAddr, valueSize), row01);
+  pagePtr->getValueRow(rAddr, valueSize, val01);
+  ASSERT_EQ(val01, row01);
 
   std::string row02("r02", 4);
   ASSERT_EQ(valueSize, row02.size());
+  std::string val02;
   ASSERT_EQ(pagePtr->setValueRow(rAddr, row02, valueSize), true);
-  ASSERT_EQ(pagePtr->getValueRow(rAddr, valueSize), row02);
+  pagePtr->getValueRow(rAddr, valueSize, val02);
+  ASSERT_EQ(val02, row02);
 
   std::string row03("row03", 5);
   rOff = pagePtr->getFirstZeroBit(maxRowCnt);

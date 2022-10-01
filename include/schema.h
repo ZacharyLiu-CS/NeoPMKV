@@ -52,15 +52,6 @@ struct Key {
       return true;
     return false;
   }
-  // TODO: need add judgement of type: check whether pod type
-  // template <typename T,
-  //           typename = typename std::enable_if<std::is_pod<T>::value>::type>
-  // void generatePK(T pkValue) {
-  //   primaryKey.resize(sizeof(T));
-  //   *(T *)primaryKey.data() = pkValue;
-  // }
-
-  // void generatePK(std::string &pkValue) { primaryKey = pkValue; }
 };
 
 using Value = std::string;
@@ -68,70 +59,71 @@ using Value = std::string;
 class ValuePtr {
  public:
   ValuePtr() {}
+  ValuePtr(PmemAddress pmAddr, TimeStamp ts) {
+    _pmemAddr = pmAddr;
+    _timestamp.store(ts, std::memory_order_release);
+    _isHot.store(false, std::memory_order_release);
+  }
+  ValuePtr(RowAddr rowAddr, TimeStamp ts) {
+    _pbrbAddr = rowAddr;
+    _timestamp.store(ts, std::memory_order_release);
+    _isHot.store(true, std::memory_order_release);
+  }
 
   ~ValuePtr() {}
 
   ValuePtr(const ValuePtr &valuePtr) {
-    _timestamp = valuePtr._timestamp;
     _pmemAddr = valuePtr._pmemAddr;
     _pbrbAddr = valuePtr._pbrbAddr;
-    _isHot = valuePtr._isHot;
+    _timestamp.store(valuePtr._timestamp, std::memory_order_release);
+    _isHot.store(valuePtr._isHot.load(std::memory_order_acquire),
+                 std::memory_order_release);
   }
 
  private:
-  std::mutex _updateLock;
-  TimeStamp _timestamp = {0};
   PmemAddress _pmemAddr = 0;
   RowAddr _pbrbAddr = 0;
-  bool _isHot = false;
+  std::atomic<TimeStamp> _timestamp{{0}};
+  std::atomic_bool _isHot{false};
 
  public:
-  TimeStamp getTimestamp() { return _timestamp; }
-
-  PmemAddress getPmemAddr() { return _pmemAddr; }
-
-  RowAddr getPBRBAddr() { return _pbrbAddr; }
-
-  bool isHot() { return _isHot; }
-
-  void setIsHot(bool isHot) {
-    std::lock_guard<std::mutex> lock(_updateLock);
-    _isHot = isHot;
+  TimeStamp getTimestamp() const {
+    return _timestamp.load(std::memory_order_acquire);
   }
 
-  void updateTS() {
-    std::lock_guard<std::mutex> lock(_updateLock);
-    this->_timestamp.getNow();
+  PmemAddress getPmemAddr() const { return _pmemAddr; }
+
+  RowAddr getPBRBAddr() const { return _pbrbAddr; }
+
+  std::pair<bool, TimeStamp> getHotStatus() const {
+    return {_isHot.load(std::memory_order_acquire),
+            _timestamp.load(std::memory_order_acquire)};
   }
-  void updateTS(TimeStamp newTS) {
-    std::lock_guard<std::mutex> lock(_updateLock);
-    this->_timestamp = newTS;
+  bool isHot() const { return _isHot.load(std::memory_order_acquire); }
+
+  void setColdPmemAddr(PmemAddress pmAddr, TimeStamp newTS = TimeStamp()) {
+    _pmemAddr = pmAddr;
+    _timestamp.store(newTS, std::memory_order_release);
+    _isHot.store(false, std::memory_order_release);
   }
 
-  void updatePmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
-    std::lock_guard<std::mutex> lock(_updateLock);
-    this->_isHot = false;
-    this->_pmemAddr = pmAddr;
-    this->_timestamp = newTS;
-  }
-  void updatePmemAddr(PmemAddress pmAddr) {
-    std::lock_guard<std::mutex> lock(_updateLock);
-    this->_isHot = false;
-    this->_pmemAddr = pmAddr;
-    this->_timestamp.getNow();
+  void evictToCold() { _isHot.store(false, std::memory_order_release); }
+
+  bool setHotTimeStamp(TimeStamp oldTS, TimeStamp newTS) {
+    if (_timestamp.compare_exchange_weak(oldTS, newTS) == false) {
+      return false;
+    }
+    _isHot.store(true, std::memory_order_release);
+    return true;
   }
 
-  void updatePBRBAddr(RowAddr rowAddr, TimeStamp newTS) {
-    std::lock_guard<std::mutex> lock(_updateLock);
-    this->_isHot = true;
+  bool setHotPBRBAddr(RowAddr rowAddr, TimeStamp oldTS, TimeStamp newTS) {
     this->_pbrbAddr = rowAddr;
-    this->_timestamp = newTS;
-  }
-  void updatePBRBAddr(RowAddr rowAddr) {
-    std::lock_guard<std::mutex> lock(_updateLock);
-    this->_isHot = true;
-    this->_pbrbAddr = rowAddr;
-    this->_timestamp.getNow();
+    if (_timestamp.compare_exchange_weak(oldTS, newTS) == false) {
+      return false;
+    }
+    _isHot.store(true, std::memory_order_release);
+    return true;
   }
 };
 
@@ -251,13 +243,13 @@ struct Schema {
 
 class SchemaAllocator {
   std::atomic_uint32_t idx{1};
-  public:
+
+ public:
   Schema createSchema(std::string name, uint32_t primaryKeyField,
                       std::vector<SchemaField> &fields) {
     return Schema(name, idx.fetch_add(1), primaryKeyField, fields);
   }
 };
-
 
 class SchemaUMap {
  private:
@@ -318,5 +310,24 @@ struct fmt::formatter<NKV::Value> {
       -> decltype(ctx.out()) {
     // ctx.out() is an output iterator to write to.
     return fmt::format_to(ctx.out(), "{}", value);
+  }
+};
+
+template <>
+struct fmt::formatter<NKV::ValuePtr> {
+  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+    return ctx.begin();
+  }
+
+  // Formats the point p using the parsed format specification (presentation)
+  // stored in this formatter.
+  template <typename FormatContext>
+  auto format(const NKV::ValuePtr &valuePtr, FormatContext &ctx) const
+      -> decltype(ctx.out()) {
+    // ctx.out() is an output iterator to write to.
+    return fmt::format_to(ctx.out(), "Hot: {} PmemAddr: {}, PBRBAddr:{} TS: {}",
+                          valuePtr.isHot(), valuePtr.getPmemAddr(),
+                          (uint64_t)valuePtr.getPBRBAddr(),
+                          valuePtr.getTimestamp());
   }
 };

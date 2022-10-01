@@ -36,9 +36,9 @@ TEST(PBRBTest, Test01) {
   uint64_t pk1_expected = v1.field1;
   ASSERT_EQ(k1.primaryKey, pk1_expected);
 
-  ValuePtr *vp1 = new ValuePtr;
-  vp1->updatePmemAddr((PmemAddress)0x12345678);
-  indexer->insert({k1.primaryKey, *vp1});
+  ValuePtr vp1 = ValuePtr();
+  vp1.setColdPmemAddr((PmemAddress)0x12345678);
+  indexer->insert({k1.primaryKey, vp1});
 
   std::string info[2] = {"Read k1, Cache k1(Cold)", "Read k1 (hot)"};
   // Step 1: Read k1, Cache k1(Cold)
@@ -72,14 +72,13 @@ TEST(PBRBTest, Test01) {
         Value pbrb_v1 = Value(12, '1');
         TimeStamp ts_step1;
         ts_step1.getNow();
-        bool status = pbrb.write(vPtr->getTimestamp(), ts_step1,
-                                     k1.schemaId, pbrb_v1, idxIter);
+        bool status = pbrb.write(vPtr->getTimestamp(), ts_step1, k1.schemaId,
+                                 pbrb_v1, idxIter);
         ASSERT_EQ(status, true);
         ASSERT_EQ(vPtr->isHot(), true);
       }
     }
   }
-  delete vp1;
 }
 
 TEST(SchemaTest, FieldTest) {
@@ -138,7 +137,7 @@ bool generateKV(uint32_t length, std::vector<Value> &values,
   }
   generate_value.end();
   NKV_LOG_I(std::cout, "Genenation Duration: {:.2f}",
-            generate_value.duration() / (double) NANOSEC_BASE);
+            generate_value.duration() / (double)NANOSEC_BASE);
 
   // for (auto v : values) {
   //   uint64_t pk = *(uint64_t *)(v.substr(4, 8).data());
@@ -166,12 +165,12 @@ bool generateKV(uint32_t length, std::vector<Value> &values,
     TimeStamp ts;
     ts.getNow();
     ValuePtr vPtr;
-    vPtr.updatePmemAddr((PmemAddress)pk);
+    vPtr.setColdPmemAddr((PmemAddress)pk);
     indexer->insert({pk, vPtr});
   }
   indexer_timer.end();
   NKV_LOG_I(std::cout, "Indexer Insertion Duration: {:.2f}s",
-            indexer_timer.duration() / (double) NANOSEC_BASE);
+            indexer_timer.duration() / (double)NANOSEC_BASE);
   return true;
 }
 
@@ -193,7 +192,8 @@ TEST(PBRBTest, Test02) {
   // Create PBRB
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
-  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false, true, 0.7, 50000);
+  PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false,
+            true, 0.7, 50000);
 
   auto &indexer = indexerList[1];
   // Cache all KVs
@@ -221,8 +221,8 @@ TEST(PBRBTest, Test02) {
           pbrb.schemaMiss(schema02.schemaId);
           TimeStamp tsInsert;
           tsInsert.getNow();
-          bool status = pbrb.write(vPtr->getTimestamp(), tsInsert,
-                                       key.schemaId, values[pk - 1], idxIter);
+          bool status = pbrb.write(vPtr->getTimestamp(), tsInsert, key.schemaId,
+                                   values[pk - 1], idxIter);
           ASSERT_EQ(status, true);
           ASSERT_EQ(vPtr->isHot(), true);
         }
@@ -230,7 +230,7 @@ TEST(PBRBTest, Test02) {
     }
     timer.end();
     NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s", i + 1,
-              timer.duration() / (double) NANOSEC_BASE);
+              timer.duration() / (double)NANOSEC_BASE);
   }
 #ifdef ENABLE_BREAKDOWN
   pbrb.analyzePerf();
@@ -288,8 +288,8 @@ TEST(PBRBTest, Test03) {
           NKV_LOG_I(std::cout, "[pk = {:4}] : [miss]", pk);
           TimeStamp tsInsert;
           tsInsert.getNow();
-          bool status = pbrb.write(vPtr->getTimestamp(), tsInsert,
-                                       key.schemaId, values[pk - 1], idxIter);
+          bool status = pbrb.write(vPtr->getTimestamp(), tsInsert, key.schemaId,
+                                   values[pk - 1], idxIter);
           ASSERT_EQ(status, true);
           ASSERT_EQ(vPtr->isHot(), true);
         }
@@ -298,7 +298,7 @@ TEST(PBRBTest, Test03) {
     sleep(sleepTime[i]);
     timer.end();
     NKV_LOG_I(std::cout, "Step {}: Duration: {:.2f}s (Sleeped {}s)", i + 1,
-              timer.duration() / (double) NANOSEC_BASE, sleepTime[i]);
+              timer.duration() / (double)NANOSEC_BASE, sleepTime[i]);
     // pbrb.traverseIdxGC();
   }
 #ifdef ENABLE_BREAKDOWN

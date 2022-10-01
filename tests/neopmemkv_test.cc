@@ -97,8 +97,8 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
     Value read_value;
     neopmkv_->get(key, read_value);
     if( read_value != expect_value){
-      std::cout<< "read value:   " << read_value << std::endl;
-      std::cout<< "expect value: " << expect_value << std::endl;
+      std::cout<< i<< " read value:   " << read_value << std::endl;
+      std::cout<< i<< " expect value: " << expect_value << std::endl;
       std::cout<< "----"<< std::endl;
     }
     // ASSERT_EQ(read_value, expect_value);
@@ -151,15 +151,15 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
   */
   delete neopmkv_;
 }
-TEST(NEOPMKVTEST, DisablePBRBTest) {
-  PBRBTest(false);
-  cleanFile(db_path);
-}
+// TEST(NEOPMKVTEST, DisablePBRBTest) {
+//   PBRBTest(false);
+//   cleanFile(db_path);
+// }
 
-TEST(NEOPMKVTEST, SYNCPBRBTest) {
-  PBRBTest(true, false);
-  cleanFile(db_path);
-}
+// TEST(NEOPMKVTEST, SYNCPBRBTest) {
+//   PBRBTest(true, false);
+//   cleanFile(db_path);
+// }
 
 TEST(NEOPMKVTEST, ASYNCPBRBTest) {
   PBRBTest(true, true);

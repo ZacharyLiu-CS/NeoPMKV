@@ -94,8 +94,8 @@ bool NeoPMKV::get(Key &key, std::string &value) {
   _durationStat.indexQueryCount.fetch_add(1);
   _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
 #endif
-  NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
-            idxIter->second);
+  // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
+  //           idxIter->second);
   return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value);
 }
 
@@ -136,7 +136,7 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
   _durationStat.indexInsertCount.fetch_add(1);
   _durationStat.indexInsertTimeNanoSecs.fetch_add(_timer.duration());
 #endif
-  NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value, vPtr);
+  // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value, vPtr);
   // status is true means insert success, we don't have the kv before
   if (status == true) return true;
   // status is false means having the old kv

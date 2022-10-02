@@ -51,6 +51,14 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
 
 PBRB::~PBRB() {
   _isAsyncRunning.store(false, std::memory_order_relaxed);
+  NKV_LOG_I(
+      std::cout,
+      "PBRB: Async Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
+      "Cost: {:.2f} ns",
+      _pbrbAsyncWriteCount.load(),
+      _pbrbAsyncWriteTimeNanoSecs.load() / (double)NANOSEC_BASE,
+      _pbrbAsyncWriteTimeNanoSecs.load() / (double)_pbrbAsyncWriteCount.load());
+
   if (_asyncGC) _stopGC();
   if (_bufferPoolPtr != nullptr) {
     delete _bufferPoolPtr;
@@ -465,10 +473,11 @@ bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
     // Rollback
     pagePtr->clearRowBitMapPage(rowOffset);
     blbs->curRowNum--;
-    NKV_LOG_I(std::cout,
-              "PBRB: Write [{}] operation timestamp [{}->{}] conflict with hot "
-              "{}. Rollback",
-              valuePtr->getTimestamp(), oldTS, value, valuePtr->isHot());
+    // NKV_LOG_I(std::cout,
+    //           "PBRB: Write [{}] operation timestamp [{}->{}] conflict with
+    //           hot "
+    //           "{}. Rollback",
+    //           valuePtr->getTimestamp(), oldTS, value, valuePtr->isHot());
     return false;
   }
 
@@ -489,15 +498,26 @@ void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
   // first sleep to wait for create schema to trigger
   while (true) {
     if (_isAsyncRunning.load(std::memory_order_relaxed)) break;
+    std::this_thread::yield();
   }
   while (_isAsyncRunning.load(std::memory_order_relaxed)) {
     for (auto &asyncBuffer : *pollList) {
       if (!asyncBuffer->Empty()) {
+#ifdef ENABLE_STATISTICS
+        PointProfiler _timer;
+        _timer.start();
+#endif
         auto bufferEntry = asyncBuffer->DequeueOneEntry();
         if (bufferEntry != nullptr) {
           syncWrite(bufferEntry->_oldTS, bufferEntry->_newTS,
                     asyncBuffer->getSchemaId(), bufferEntry->_entry_content,
                     bufferEntry->_iter);
+          bufferEntry->consumeContent();
+#ifdef ENABLE_STATISTICS
+          _timer.end();
+          _pbrbAsyncWriteCount.fetch_add(1);
+          _pbrbAsyncWriteTimeNanoSecs.fetch_add(_timer.duration());
+#endif
         }
       }
     }

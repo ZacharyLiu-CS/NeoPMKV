@@ -58,18 +58,30 @@ struct AsyncBufferEntry {
   TimeStamp _oldTS;
   TimeStamp _newTS;
   IndexerIterator _iter;
+  std::atomic_bool _entryReady{false};
   Value _entry_content;
 
   AsyncBufferEntry(uint32_t entry_size) : _entry_size(entry_size) {
     _entry_content.resize(_entry_size);
+    _entryReady.store(false, std::memory_order_release);
   }
-  inline void copyContent(TimeStamp oldTS, TimeStamp newTS,
+  inline bool getContentReady() {
+    return _entryReady.load(std::memory_order_acquire);
+  }
+  inline void consumeContent() {
+    _entryReady.store(false, std::memory_order_release);
+  }
+  inline bool copyContent(TimeStamp oldTS, TimeStamp newTS,
                           IndexerIterator iter, const Value &src) {
-    assert(_entry_size == src.size());
-    _oldTS = oldTS;
-    _newTS = newTS;
-    _iter = iter;
-    memcpy((char *)_entry_content.data(), src.c_str(), _entry_size);
+    if (_entryReady.load(std::memory_order_acquire) == false) {
+      _oldTS = oldTS;
+      _newTS = newTS;
+      _iter = iter;
+      memcpy((char *)_entry_content.data(), src.c_str(), _entry_size);
+      _entryReady.store(true, std::memory_order_release);
+      return true;
+    }
+    return false;
   }
 };
 
@@ -105,11 +117,10 @@ class AsyncBufferQueue {
         _enqueue_head.fetch_add(1, std::memory_order_relaxed);
     if (allocated_offset <
         _dequeue_tail.load(std::memory_order_relaxed) + _queue_size) {
-      _queue_contents[allocated_offset % _queue_size]->copyContent(oldTS, newTS,
-                                                                   iter, value);
-
-      // NKV_LOG_I(std::cout, "Enqueue entry");
-      return true;
+      auto res = _queue_contents[allocated_offset % _queue_size]->copyContent(
+          oldTS, newTS, iter, value);
+      // NKV_LOG_I(std::cout, "Enqueue Entry [{}]: {}", allocated_offset, value);
+      if (res == true) return true;
     }
     _enqueue_head.fetch_sub(1, std::memory_order_relaxed);
     return false;
@@ -121,7 +132,12 @@ class AsyncBufferQueue {
 
     if (accessing_offset < _enqueue_head.load(std::memory_order_relaxed)) {
       // NKV_LOG_I(std::cout, "Dequeue entry");
-      return _queue_contents[accessing_offset % _queue_size];
+      auto bufferEntry = _queue_contents[accessing_offset % _queue_size];
+      if (bufferEntry->getContentReady()) {
+        // NKV_LOG_I(std::cout, "Dequeue Entry [{}]: {}", accessing_offset,
+        //           bufferEntry->_entry_content);
+        return bufferEntry;
+      }
     }
     _dequeue_tail.fetch_sub(1, std::memory_order_relaxed);
     return nullptr;
@@ -194,6 +210,9 @@ class PBRB {
   std::vector<std::shared_ptr<AsyncBufferQueue>> _asyncThreadPollList;
   std::thread _asyncThread;
   std::atomic_bool _isAsyncRunning{false};
+
+  std::atomic<uint64_t> _pbrbAsyncWriteCount = {0};
+  std::atomic<uint64_t> _pbrbAsyncWriteTimeNanoSecs = {0};
 
   TimeStamp _watermark;
 
@@ -311,6 +330,7 @@ class PBRB {
     uint64_t lastHitCount = 0;
     std::vector<uint64_t> hitVec{0};
     uint64_t interval = 200000;
+
 
     inline bool updateVec() {
       if (accessCount % interval == 0) {

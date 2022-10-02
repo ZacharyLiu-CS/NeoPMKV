@@ -210,9 +210,9 @@ class PBRB {
   bool _async_pbrb = false;
   std::map<SchemaId, std::shared_ptr<AsyncBufferQueue>> _asyncQueueMap;
 
-  std::vector<std::shared_ptr<AsyncBufferQueue>> _asyncThreadPollList;
+  oneapi::tbb::concurrent_vector<std::shared_ptr<AsyncBufferQueue>> _asyncThreadPollList;
   std::thread _asyncThread;
-  std::atomic_bool _isAsyncRunning{false};
+  std::atomic_uint32_t _isAsyncRunning{0};
 
   std::atomic<uint64_t> _pbrbAsyncWriteCount = {0};
   std::atomic<uint64_t> _pbrbAsyncWriteTimeNanoSecs = {0};
@@ -226,6 +226,7 @@ class PBRB {
   uint64_t _retentionWindowSecs = 60;  // 1 minute
   double _targetOccupancyRatio = 0.7;
   double _startGCOccupancyRatio = 0.75;
+  std::mutex _createCacheMutex;
 
  public:
   // create a pageList for a SKV table according to schemaID

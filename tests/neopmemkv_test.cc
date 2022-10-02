@@ -165,7 +165,7 @@ TEST(NEOPMKVTEST, ASYNCPBRBTest) {
   PBRBTest(true, true);
   cleanFile(db_path);
 }
-
+/*
 TEST(NEOPMKVTEST, TimeStaticsTest) {
   int res = system(clean_cmd.c_str());
   res = system(mkdir_cmd.c_str());
@@ -208,6 +208,7 @@ TEST(NEOPMKVTEST, TimeStaticsTest) {
   }
   delete neopmkv_;
 }
+*/
 
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);

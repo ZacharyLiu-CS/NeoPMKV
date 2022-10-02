@@ -8,6 +8,7 @@
 
 #include "pbrb.h"
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include "logging.h"
 
@@ -51,7 +52,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
 }
 
 PBRB::~PBRB() {
-  _isAsyncRunning.store(false, std::memory_order_release);
+  _isAsyncRunning.store(0, std::memory_order_release);
   NKV_LOG_I(
       std::cout,
       "PBRB: Async Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
@@ -72,21 +73,13 @@ BufferPage *PBRB::getPageAddr(void *rowAddr) {
 }
 
 BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
+  std::lock_guard<std::mutex> createCacheGuard(_createCacheMutex);
   if (_freePageList.size() == 0) {
     NKV_LOG_E(std::cerr, "Cannot create cache for schema: {}! (no free page)",
               schemaId);
     return nullptr;
   }
 
-  if (_async_pbrb == true) {
-    uint32_t schemaSize = _schemaUMap->find(schemaId)->getSize();
-    auto bufferQueue = std::make_shared<AsyncBufferQueue>(schemaId, schemaSize,
-                                                          pbrbAsyncQueueSize);
-    _asyncQueueMap.insert({schemaId, bufferQueue});
-    _asyncThreadPollList.push_back(bufferQueue);
-    _isAsyncRunning.store(true, std::memory_order_release);
-    // NKV_LOG_I(std::cout, "async Queue size {}", _asyncQueue.size());
-  }
   // Get a page and set schemaMetadata.
   BufferPage *pagePtr = nullptr;
   bool page_res = _freePageList.try_pop(pagePtr);
@@ -113,7 +106,16 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
 
   blbs->curPageNum++;
   _AccStatBySchema.insert({schemaId, AccessStatistics()});
-
+  if (_async_pbrb == true) {
+    uint32_t schemaSize = _schemaUMap->find(schemaId)->getSize();
+    auto bufferQueue = std::make_shared<AsyncBufferQueue>(schemaId, schemaSize,
+                                                          pbrbAsyncQueueSize);
+    _asyncQueueMap.insert({schemaId, bufferQueue});
+    std::atomic_signal_fence(std::memory_order_release);
+    _asyncThreadPollList.push_back(bufferQueue);
+    _isAsyncRunning.fetch_add(1, std::memory_order_release);
+    // NKV_LOG_I(std::cout, "async Queue size {}", _asyncQueue.size());
+  }
   return pagePtr;
 }
 
@@ -167,7 +169,6 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     // al3
 
     pointTimer.start();
-
 
     auto al3ns = pointTimer.end();
     // K2LOG_I(log::pbrb, "Alloc new page type 1: sid: {}, sname: {},
@@ -498,11 +499,13 @@ bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
 void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
   // first sleep to wait for create schema to trigger
   while (true) {
-    if (_isAsyncRunning.load(std::memory_order_acquire)) break;
+    if (_isAsyncRunning.load(std::memory_order_acquire) != 0) break;
     std::this_thread::yield();
   }
-  while (_isAsyncRunning.load(std::memory_order_acquire)) {
-    for (auto &asyncBuffer : *pollList) {
+  while (_isAsyncRunning.load(std::memory_order_acquire) != 0) {
+    for (uint32_t i = 0; i < _isAsyncRunning.load(std::memory_order_acquire);
+         i++) {
+      auto asyncBuffer = (*pollList)[i];
       if (!asyncBuffer->Empty()) {
 #ifdef ENABLE_STATISTICS
         PointProfiler _timer;

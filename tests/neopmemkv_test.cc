@@ -151,10 +151,10 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
   
   delete neopmkv_;
 }
-// TEST(NEOPMKVTEST, DisablePBRBTest) {
-//   PBRBTest(false);
-//   cleanFile(db_path);
-// }
+TEST(NEOPMKVTEST, DisablePBRBTest) {
+  PBRBTest(false);
+  cleanFile(db_path);
+}
 
 TEST(NEOPMKVTEST, SYNCPBRBTest) {
   PBRBTest(true, false);

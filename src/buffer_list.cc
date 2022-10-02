@@ -40,8 +40,9 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
   maxRowCnt = (pageSize - pageHeaderSize) / rowSize;
 }
 
-bool BufferListBySchema::reclaimPage(std::list<BufferPage *> &freePageList,
-                                     BufferPage *pagePtr) {
+bool BufferListBySchema::reclaimPage(
+    oneapi::tbb::concurrent_bounded_queue<BufferPage *> &freePageList,
+    BufferPage *pagePtr) {
   // Case 1: head page
   if (pagePtr == headPage) {
     curPageNum--;
@@ -51,7 +52,7 @@ bool BufferListBySchema::reclaimPage(std::list<BufferPage *> &freePageList,
     if (headPage == nullptr) {
       assert(curPageNum.load() == 0);
       tailPage = nullptr;
-      freePageList.emplace_back(pagePtr);
+      freePageList.push(pagePtr);
       return true;
     }
     headPage->setPrevPage(nullptr);
@@ -66,12 +67,12 @@ bool BufferListBySchema::reclaimPage(std::list<BufferPage *> &freePageList,
     prevPtr->setNextPage(nextPtr);
     nextPtr->setPrevPage(prevPtr);
   }
-  freePageList.emplace_back(pagePtr);
+  freePageList.push(pagePtr);
   return true;
 }
 
 uint64_t BufferListBySchema::reclaimEmptyPages(
-    std::list<BufferPage *> &freePageList) {
+    oneapi::tbb::concurrent_bounded_queue<BufferPage *>  &freePageList) {
   if (curPageNum.load() == 0) return 0;
   uint64_t reclaimedPageNum = 0;
 

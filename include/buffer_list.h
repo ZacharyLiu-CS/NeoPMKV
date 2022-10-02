@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <oneapi/tbb/concurrent_queue.h>
 #include <atomic>
 #include <list>
 #include "buffer_page.h"
@@ -68,8 +69,11 @@ class BufferListBySchema {
   void setOccuBitmapSize(uint32_t pageSize);
   void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize,
                uint32_t rowHeaderSize);
-  bool reclaimPage(std::list<BufferPage *> &freePageList, BufferPage *pagePtr);
-  uint64_t reclaimEmptyPages(std::list<BufferPage *> &freePageList);
+  bool reclaimPage(
+      oneapi::tbb::concurrent_bounded_queue<BufferPage *> &freePageList,
+      BufferPage *pagePtr);
+  uint64_t reclaimEmptyPages(
+      oneapi::tbb::concurrent_bounded_queue<BufferPage *> &freePageList);
   friend class PBRB;
 };  // end of struct BufferListBySchema
 }  // end of namespace NKV

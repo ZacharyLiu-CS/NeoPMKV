@@ -9,6 +9,8 @@
 #pragma once
 
 #include <oneapi/tbb/concurrent_map.h>
+#include <oneapi/tbb/concurrent_queue.h>
+#include <oneapi/tbb/concurrent_set.h>
 #include <oneapi/tbb/concurrent_vector.h>
 #include <algorithm>
 #include <atomic>
@@ -44,12 +46,11 @@ namespace NKV {
 const uint32_t rowCRC32Offset = 0;
 const uint32_t rowTSOffset = sizeof(CRC32);
 const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
-const uint32_t pbrbAsyncQueueSize = 16;
+const uint32_t pbrbAsyncQueueSize = 32;
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT =
-    oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerT = std::map<decltype(Key::primaryKey), ValuePtr>;
 using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
 using IndexerIterator = IndexerT::iterator;
 
@@ -119,7 +120,8 @@ class AsyncBufferQueue {
         _dequeue_tail.load(std::memory_order_relaxed) + _queue_size) {
       auto res = _queue_contents[allocated_offset % _queue_size]->copyContent(
           oldTS, newTS, iter, value);
-      // NKV_LOG_I(std::cout, "Enqueue Entry [{}]: {}", allocated_offset, value);
+      // NKV_LOG_I(std::cout, "Enqueue Entry [{}]: {}", allocated_offset,
+      // value);
       if (res == true) return true;
     }
     _enqueue_head.fetch_sub(1, std::memory_order_relaxed);
@@ -189,7 +191,8 @@ class PBRB {
 
   // A list to store allocated free pages
   BufferPage *_bufferPoolPtr = nullptr;
-  std::list<BufferPage *> _freePageList;
+  // std::list<BufferPage *> _freePageList;
+  oneapi::tbb::concurrent_bounded_queue<BufferPage *> _freePageList;
 
   // A Map to store pages used by different SKV table, and one SKV table
   // corresponds to a list
@@ -221,18 +224,19 @@ class PBRB {
   std::chrono::microseconds _gcIntervalus = std::chrono::microseconds(50000);
   uint64_t GCFailedTimes = 0;
   uint64_t _retentionWindowSecs = 60;  // 1 minute
-  double targetOccupancyRatio = 0.7;
-  double startGCOccupancyRatio = 0.75;
+  double _targetOccupancyRatio = 0.7;
+  double _startGCOccupancyRatio = 0.75;
+
+ public:
+  // create a pageList for a SKV table according to schemaID
+  BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer = 0);
 
  private:
   BufferPage *getPageAddr(void *rowAddr);
 
-  std::list<BufferPage *> &getFreePageList() { return _freePageList; }
+  decltype(_freePageList) &getFreePageList() { return _freePageList; }
 
   uint32_t getMaxPageNumber() { return _maxPageNumber; }
-
-  // create a pageList for a SKV table according to schemaID
-  BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer = 0);
 
   BufferPage *AllocNewPageForSchema(SchemaId schemaId);
 
@@ -331,7 +335,6 @@ class PBRB {
     std::vector<uint64_t> hitVec{0};
     uint64_t interval = 200000;
 
-
     inline bool updateVec() {
       if (accessCount % interval == 0) {
         hitVec.emplace_back(hitCount - lastHitCount);
@@ -400,7 +403,7 @@ class PBRB {
 
  private:
   std::future<bool> _GCResult;
-  std::mutex traverseIdxGCLock_;
+  std::mutex _traverseIdxGCLock;
   // GC
  private:
   bool _traverseIdxGCBySchema(SchemaId schemaid);

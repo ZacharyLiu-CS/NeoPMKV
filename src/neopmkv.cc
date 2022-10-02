@@ -247,7 +247,7 @@ bool NeoPMKV::remove(Key &key) {
   if (isHot) {
     _pbrb->dropRow(idxIter->second.getPBRBAddr());
   }
-  indexer->unsafe_erase(idxIter);
+  indexer->erase(idxIter);
   return true;
 }
 bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,

@@ -27,14 +27,15 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   _retentionWindowSecs = retentionWindowSecs;
   _async_pbrb = async_pbrb;
   _gcIntervalus = std::chrono::microseconds(gcIntervalus);
+  _targetOccupancyRatio = targetOccupancyRatio;
   _asyncGC = enable_async_gc;
   // allocate bufferpage
   auto aligned_val = std::align_val_t{_pageSize};
   _bufferPoolPtr = static_cast<BufferPage *>(operator new(
       maxPageNumber * sizeof(BufferPage), aligned_val));
-
+  _freePageList.set_capacity(maxPageNumber);
   for (int idx = 0; idx < maxPageNumber; idx++) {
-    _freePageList.push_back(_bufferPoolPtr + idx);
+    _freePageList.push(_bufferPoolPtr + idx);
   }
   if (_async_pbrb == true) {
     _asyncThread =
@@ -50,7 +51,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
 }
 
 PBRB::~PBRB() {
-  _isAsyncRunning.store(false, std::memory_order_relaxed);
+  _isAsyncRunning.store(false, std::memory_order_release);
   NKV_LOG_I(
       std::cout,
       "PBRB: Async Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
@@ -71,7 +72,7 @@ BufferPage *PBRB::getPageAddr(void *rowAddr) {
 }
 
 BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
-  if (_freePageList.empty()) {
+  if (_freePageList.size() == 0) {
     NKV_LOG_E(std::cerr, "Cannot create cache for schema: {}! (no free page)",
               schemaId);
     return nullptr;
@@ -83,12 +84,13 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
                                                           pbrbAsyncQueueSize);
     _asyncQueueMap.insert({schemaId, bufferQueue});
     _asyncThreadPollList.push_back(bufferQueue);
-    _isAsyncRunning.store(true, std::memory_order_relaxed);
+    _isAsyncRunning.store(true, std::memory_order_release);
     // NKV_LOG_I(std::cout, "async Queue size {}", _asyncQueue.size());
   }
   // Get a page and set schemaMetadata.
-  BufferPage *pagePtr = _freePageList.front();
-
+  BufferPage *pagePtr = nullptr;
+  bool page_res = _freePageList.try_pop(pagePtr);
+  if (page_res == false) return pagePtr;
   std::shared_ptr<BufferListBySchema> blbsPtr =
       std::make_shared<BufferListBySchema>(schemaId, _pageSize, _pageHeaderSize,
                                            _rowHeaderSize, _schemaUMap,
@@ -110,7 +112,6 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   pagePtr->setSchemaIDPage(schemaId);
 
   blbs->curPageNum++;
-  _freePageList.pop_front();
   _AccStatBySchema.insert({schemaId, AccessStatistics()});
 
   return pagePtr;
@@ -145,7 +146,9 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     // al2
     pointTimer.start();
     assert(_freePageList.size() > 0);
-    BufferPage *newPage = _freePageList.front();
+    BufferPage *newPage = nullptr;
+    bool res = _freePageList.try_pop(newPage);
+    if (res == false) return newPage;
 
     // Initialize Page.
     newPage->initializePage();
@@ -164,7 +167,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     // al3
 
     pointTimer.start();
-    _freePageList.pop_front();
+
 
     auto al3ns = pointTimer.end();
     // K2LOG_I(log::pbrb, "Alloc new page type 1: sid: {}, sname: {},
@@ -204,7 +207,9 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
   }
 
   auto &blbs = _bufferMap[schemaId];
-  BufferPage *newPage = _freePageList.front();
+  BufferPage *newPage = nullptr;
+  bool res = _freePageList.try_pop(newPage);
+  if (res == false) return newPage;
   blbs->curPageNum++;
 
   // Initialize Page.
@@ -229,7 +234,6 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
     blbs->tailPage = newPage;
   }
 
-  _freePageList.pop_front();
   // K2LOG_I(log::pbrb, "Alloc new page type 2: sid: {}, sname: {},
   // currPageNum: {}, fromPagePtr: {}", schemaId,
   // _bufferMap[schemaId].schema->name, _bufferMap[schemaId].curPageNum, (void
@@ -488,19 +492,16 @@ bool PBRB::asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                       const Value &value, IndexerIterator iter) {
   auto res =
       _asyncQueueMap[schemaId]->EnqueueOneEntry(oldTS, newTS, iter, value);
-  if (res == false) {
-    NKV_LOG_I(std::cout, "Fail to insert {} to buffer queue", value);
-  }
   return res;
 }
 
 void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
   // first sleep to wait for create schema to trigger
   while (true) {
-    if (_isAsyncRunning.load(std::memory_order_relaxed)) break;
+    if (_isAsyncRunning.load(std::memory_order_acquire)) break;
     std::this_thread::yield();
   }
-  while (_isAsyncRunning.load(std::memory_order_relaxed)) {
+  while (_isAsyncRunning.load(std::memory_order_acquire)) {
     for (auto &asyncBuffer : *pollList) {
       if (!asyncBuffer->Empty()) {
 #ifdef ENABLE_STATISTICS
@@ -553,7 +554,7 @@ bool PBRB::traverseIdxGC() {
             "Current number of free pages / max page number : ({} / {}), "
             "OccupancyRatio = {:.3f}",
             _freePageList.size(), getMaxPageNumber(), occupancyRatio);
-  if (occupancyRatio < targetOccupancyRatio) {
+  if (occupancyRatio < _targetOccupancyRatio) {
     return true;
   }
 
@@ -593,7 +594,7 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
   if (occupancyRatio == 0) return false;
   uint64_t moveNanoSecs = (double)_retentionWindowSecs * NANOSEC_BASE *
                           exp2(-GCFailedTimes) * (1 - occupancyRatio) /
-                          (1 - targetOccupancyRatio);
+                          (1 - _targetOccupancyRatio);
   watermark.moveBackward(getTicksByNanosecs(moveNanoSecs));
   NKV_LOG_I(std::cout,
             "Start to GC schema id: {}, startTS: {}, watermark: {}, "
@@ -613,7 +614,7 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
       continue;
     if (evictRow(iter)) {
       evictCnt++;
-      if (_checkOccupancyRatio(targetOccupancyRatio)) {
+      if (_checkOccupancyRatio(_targetOccupancyRatio)) {
         achieveTarget = true;
         break;
       }
@@ -634,12 +635,12 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
 }
 
 bool PBRB::_asyncTraverseIdxGC() {
-  while (_isGCRunning.load(std::memory_order_relaxed)) {
-    if (_checkOccupancyRatio(startGCOccupancyRatio)) {
+  while (_isGCRunning.load(std::memory_order_acquire)) {
+    if (_checkOccupancyRatio(_startGCOccupancyRatio)) {
       std::this_thread::sleep_for(_gcIntervalus);
       // std::this_thread::yield();
     } else {
-      std::lock_guard<std::mutex> guard(traverseIdxGCLock_);
+      std::lock_guard<std::mutex> guard(_traverseIdxGCLock);
       traverseIdxGC();
     }
   };
@@ -647,7 +648,7 @@ bool PBRB::_asyncTraverseIdxGC() {
 }
 
 void PBRB::_stopGC() {
-  _isGCRunning.store(false, std::memory_order_relaxed);
+  _isGCRunning.store(false, std::memory_order_release);
   _GCResult.wait();
   if (_GCResult.get() == true)
     NKV_LOG_I(std::cout, "Successfully stopped _asyncGC.");

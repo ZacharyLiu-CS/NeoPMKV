@@ -61,6 +61,9 @@ class NeoPMKV {
         _schemaAllocator.createSchema(name, primarykey_id, fields);
     _sUMap.addSchema(newSchema);
     _indexerList.insert({newSchema.schemaId, std::make_shared<IndexerT>()});
+    if(_enable_pbrb == true){
+      _pbrb->createCacheForSchema(newSchema.schemaId);
+    }
     return newSchema.schemaId;
   }
 

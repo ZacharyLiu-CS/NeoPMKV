@@ -16,7 +16,8 @@ namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
            SchemaUMap *umap, uint64_t retentionWindowSecs,
            uint32_t maxPageSearchNum, bool async_pbrb, bool enable_async_gc,
-           double targetOccupancyRatio, uint64_t gcIntervalus) {
+           double targetOccupancyRatio, uint64_t gcIntervalus,
+           double hitThreshold) {
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
   // initialization
 
@@ -29,7 +30,9 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   _async_pbrb = async_pbrb;
   _gcIntervalus = std::chrono::microseconds(gcIntervalus);
   _targetOccupancyRatio = targetOccupancyRatio;
+  _startGCOccupancyRatio = targetOccupancyRatio + 0.5;
   _asyncGC = enable_async_gc;
+  _hitThreshold = hitThreshold;
   // allocate bufferpage
   auto aligned_val = std::align_val_t{_pageSize};
   _bufferPoolPtr = static_cast<BufferPage *>(operator new(
@@ -190,7 +193,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
                                         BufferPage *pagePtr) {
   // TODO: validation
   if (_freePageList.empty()) {
-    NKV_LOG_E(std::cout, "No Free Page Now!");
+    // NKV_LOG_E(std::cout, "No Free Page Now!");
     return nullptr;
   }
 
@@ -442,11 +445,17 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
 }
 bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                  const Value &value, IndexerIterator iter) {
-  if (_bufferMap.find(schemaId) == _bufferMap.end()) {
-    NKV_LOG_I(
-        std::cout,
-        "A new schema (sid: {}) will be inserted into _bufferMap:", schemaId);
-    createCacheForSchema(schemaId);
+  // if (_bufferMap.find(schemaId) == _bufferMap.end()) {
+  //   NKV_LOG_I(
+  //       std::cout,
+  //       "A new schema (sid: {}) will be inserted into _bufferMap:",
+  //       schemaId);
+  //   createCacheForSchema(schemaId);
+  // }
+  double lastIntervalHitRatio =
+      _AccStatBySchema[schemaId].getLastIntervalHitRatio();
+  if (lastIntervalHitRatio > 0 && lastIntervalHitRatio < _hitThreshold) {
+    return false;
   }
   if (_async_pbrb == true) {
     return asyncWrite(oldTS, newTS, schemaId, value, iter);
@@ -471,7 +480,7 @@ bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
   BufferPage *pagePtr = retVal.first;
   RowOffset rowOffset = retVal.second;
   if (pagePtr == nullptr) {
-    NKV_LOG_E(std::cout, "Warning: Cannot find empty slot!");
+    // NKV_LOG_E(std::cout, "Warning: Cannot find empty slot!");
     return false;
   }
   RowAddr rowAddr = getAddrByPageAndRow(pagePtr, rowOffset);

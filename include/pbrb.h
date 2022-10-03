@@ -152,15 +152,6 @@ class AsyncBufferQueue {
 
 class PBRB {
  public:
-  // constructor
-  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-       SchemaUMap *umap, uint64_t retentionWindowSecs = 60,
-       uint32_t maxPageSearchNum = 5, bool async_pbrb = false,
-       bool enable_async_gc = false, double targetOccupancyRatio = 0.7,
-       uint64_t gcIntervalus = 100000);
-  // dtor
-  ~PBRB();
-
 #ifdef ENABLE_BREAKDOWN
   void analyzePerf() {
     auto outputVector = [](std::vector<double> &vec, std::string &&name) {
@@ -227,6 +218,7 @@ class PBRB {
   uint64_t _retentionWindowSecs = 60;  // 1 minute
   double _targetOccupancyRatio = 0.7;
   double _startGCOccupancyRatio = 0.75;
+  double _hitThreshold = 0.3;
   std::mutex _createCacheMutex;
 
  public:
@@ -334,12 +326,12 @@ class PBRB {
     uint64_t accessCount = 0;
     uint64_t hitCount = 0;
     uint64_t lastHitCount = 0;
-    std::vector<uint64_t> hitVec{0};
+    std::vector<uint64_t> hitVec;
     uint64_t interval = 200000;
 
     inline bool updateVec() {
       if (accessCount % interval == 0) {
-        hitVec.emplace_back(hitCount - lastHitCount);
+        hitVec.push_back(hitCount - lastHitCount);
         lastHitCount = hitCount;
         return true;
       }
@@ -359,6 +351,13 @@ class PBRB {
         return (double)hitCount / accessCount;
       else
         return 2;
+    }
+    inline double getLastIntervalHitRatio() {
+      if (hitVec.size() == 0) {
+        return 0;
+      } else {
+        return (double)hitVec.back() / interval;
+      }
     }
   };
 
@@ -427,6 +426,14 @@ class PBRB {
   bool traverseIdxGC();
 
  public:
+  // constructor
+  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
+       SchemaUMap *umap, uint64_t retentionWindowSecs = 60,
+       uint32_t maxPageSearchNum = 5, bool async_pbrb = false,
+       bool enable_async_gc = false, double targetOccupancyRatio = 0.7,
+       uint64_t gcIntervalus = 100000, double hitThreshold = 0.3);
+  // dtor
+  ~PBRB();
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
             SchemaId schemaId, Value &value, ValuePtr *vPtr,
             std::vector<uint32_t> fields = std::vector<uint32_t>());

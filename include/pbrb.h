@@ -8,20 +8,32 @@
 
 #pragma once
 
+#include <oneapi/tbb/concurrent_map.h>
+#include <oneapi/tbb/concurrent_queue.h>
+#include <oneapi/tbb/concurrent_set.h>
+#include <oneapi/tbb/concurrent_vector.h>
+#include <algorithm>
+#include <atomic>
 #include <bitset>
 #include <cassert>
+#include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <list>
 #include <map>
 #include <memory>
 #include <new>
+#include <numeric>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 // header of this project
+#include "buffer_list.h"
 #include "buffer_page.h"
 #include "logging.h"
 #include "pmem_engine.h"
@@ -31,221 +43,198 @@
 
 namespace NKV {
 
-using RowOffset = uint32_t;
-using RowAddr = void *;
-using CRC32 = uint32_t;
-
 const uint32_t rowCRC32Offset = 0;
 const uint32_t rowTSOffset = sizeof(CRC32);
 const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
+const uint32_t pbrbAsyncQueueSize = 32;
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = std::map<Key, Value *>;
+using IndexerT = std::map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
+using IndexerIterator = IndexerT::iterator;
+
+struct AsyncBufferEntry {
+  uint32_t _entry_size = 0;
+  TimeStamp _oldTS;
+  TimeStamp _newTS;
+  IndexerIterator _iter;
+  std::atomic_bool _entryReady{false};
+  Value _entry_content;
+
+  AsyncBufferEntry(uint32_t entry_size) : _entry_size(entry_size) {
+    _entry_content.resize(_entry_size);
+    _entryReady.store(false, std::memory_order_release);
+  }
+  inline bool getContentReady() {
+    return _entryReady.load(std::memory_order_acquire);
+  }
+  inline void consumeContent() {
+    _entryReady.store(false, std::memory_order_release);
+  }
+  inline bool copyContent(TimeStamp oldTS, TimeStamp newTS,
+                          IndexerIterator iter, const Value &src) {
+    if (_entryReady.load(std::memory_order_acquire) == false) {
+      _oldTS = oldTS;
+      _newTS = newTS;
+      _iter = iter;
+      memcpy((char *)_entry_content.data(), src.c_str(), _entry_size);
+      _entryReady.store(true, std::memory_order_release);
+      return true;
+    }
+    return false;
+  }
+};
+
+class AsyncBufferQueue {
+ private:
+  SchemaId _schema_id = 0;
+  uint32_t _schema_size = 0;
+  uint32_t _queue_size = 0;
+
+  std::vector<std::shared_ptr<AsyncBufferEntry>> _queue_contents;
+  // control the queue push and pop function
+  std::atomic_uint32_t _enqueue_head{0};
+  std::atomic_uint32_t _dequeue_tail{0};
+
+ public:
+  AsyncBufferQueue(uint32_t schema_id, uint32_t schema_size,
+                   uint32_t queue_size)
+      : _schema_id(schema_id),
+        _schema_size(schema_size),
+        _queue_size(queue_size) {
+    _enqueue_head.store(0, std::memory_order_relaxed);
+    _dequeue_tail.store(0, std::memory_order_relaxed);
+    _queue_contents.resize(queue_size);
+    for (auto i = 0; i < queue_size; i++) {
+      _queue_contents[i] = std::make_shared<AsyncBufferEntry>(schema_size);
+    }
+  }
+  SchemaId getSchemaId() { return _schema_id; }
+
+  bool EnqueueOneEntry(TimeStamp oldTS, TimeStamp newTS, IndexerIterator iter,
+                       const Value &value) {
+    uint32_t allocated_offset =
+        _enqueue_head.fetch_add(1, std::memory_order_relaxed);
+    if (allocated_offset <
+        _dequeue_tail.load(std::memory_order_relaxed) + _queue_size) {
+      auto res = _queue_contents[allocated_offset % _queue_size]->copyContent(
+          oldTS, newTS, iter, value);
+      // NKV_LOG_I(std::cout, "Enqueue Entry [{}]: {}", allocated_offset,
+      // value);
+      if (res == true) return true;
+    }
+    _enqueue_head.fetch_sub(1, std::memory_order_relaxed);
+    return false;
+  }
+
+  std::shared_ptr<AsyncBufferEntry> DequeueOneEntry() {
+    uint32_t accessing_offset =
+        _dequeue_tail.fetch_add(1, std::memory_order_relaxed);
+
+    if (accessing_offset < _enqueue_head.load(std::memory_order_relaxed)) {
+      // NKV_LOG_I(std::cout, "Dequeue entry");
+      auto bufferEntry = _queue_contents[accessing_offset % _queue_size];
+      if (bufferEntry->getContentReady()) {
+        // NKV_LOG_I(std::cout, "Dequeue Entry [{}]: {}", accessing_offset,
+        //           bufferEntry->_entry_content);
+        return bufferEntry;
+      }
+    }
+    _dequeue_tail.fetch_sub(1, std::memory_order_relaxed);
+    return nullptr;
+  }
+  bool Empty() {
+    return _enqueue_head.load(std::memory_order_relaxed) <=
+           _dequeue_tail.load(std::memory_order_relaxed);
+  }
+};
 
 class PBRB {
-  struct RowHeader {
-    char CRC[4];
-    TimeStamp timestamp;
-    PmemAddress pmemAddr;
-    char *kvNodeAddr;
-  } __attribute__((packed));
+ public:
+#ifdef ENABLE_BREAKDOWN
+  void analyzePerf() {
+    auto outputVector = [](std::vector<double> &vec, std::string &&name) {
+      double total = std::accumulate<std::vector<double>::iterator, double>(
+          vec.begin(), vec.end(), 0);
+      NKV_LOG_I(std::cout,
+                "Number of {}: {}, total time cost: {:.2f} s, average time "
+                "cost: {:.2f} ns",
+                name, vec.size(), total / 1000000000, total / vec.size());
+    };
+    outputVector(findSlotNss, std::string("findSlotNss"));
+    outputVector(fcrpNss, std::string("fcrpNss"));
+    outputVector(searchingIdxNss, std::string("searchingIdxNss"));
+  }
+  std::vector<double> findSlotNss;
+  std::vector<double> fcrpNss;
+  std::vector<double> searchingIdxNss;
+#endif
 
  private:
+  std::atomic_bool _isGCRunning{false};
   uint32_t _maxPageNumber;
   uint32_t _pageSize = pageSize;
-  uint32_t _pageHeaderSize = 64;
-  uint32_t _rowHeaderSize = sizeof(RowHeader);
+  uint32_t _pageHeaderSize = PAGE_HEADER_SIZE;
+  uint32_t _rowHeaderSize = ROW_HEADER_SIZE;
 
   uint32_t _maxPageSearchingNum;
-  std::string _fcrpOutputFileName;
+
   // A list to store allocated free pages
   BufferPage *_bufferPoolPtr = nullptr;
-  std::list<BufferPage *> _freePageList;
+  // std::list<BufferPage *> _freePageList;
+  oneapi::tbb::concurrent_bounded_queue<BufferPage *> _freePageList;
 
   // A Map to store pages used by different SKV table, and one SKV table
   // corresponds to a list
-  std::map<int, std::list<BufferPage *>> _usedPageMap;
+  std::map<SchemaId, std::list<BufferPage *>> _usedPageMap;
 
-  IndexerT *_indexer;
+  IndexerList *_indexListPtr;
+
   uint32_t _splitCnt = 0;
   uint32_t _evictCnt = 0;
+  SchemaUMap *_schemaUMap;
 
-  SchemaAllocator _schemaAllocator;
-  SchemaUMap _schemaUMap;
+  friend class BufferListBySchema;
+  std::map<SchemaId, std::shared_ptr<BufferListBySchema>> _bufferMap;
 
-  struct BufferListBySchema {
-    Schema *ownSchema = nullptr;
-    uint32_t occuBitmapSize;
-    uint32_t nullableBitmapSize;
-    uint32_t maxRowCnt;
-    std::vector<FieldMetaData> fieldsInfo;
-    uint32_t rowSize;
+  bool _async_pbrb = false;
+  std::map<SchemaId, std::shared_ptr<AsyncBufferQueue>> _asyncQueueMap;
 
-    uint32_t curPageNum = 0;
-    uint32_t curRowNum = 0;
+  oneapi::tbb::concurrent_vector<std::shared_ptr<AsyncBufferQueue>>
+      _asyncThreadPollList;
+  std::thread _asyncThread;
+  std::atomic_uint32_t _isAsyncRunning{0};
 
-    PBRB *bePBRBPtr = nullptr;
-    // manage the buffer list
-    BufferPage *headPage = nullptr;
-    BufferPage *tailPage = nullptr;
+  std::atomic<uint64_t> _pbrbAsyncWriteCount = {0};
+  std::atomic<uint64_t> _pbrbAsyncWriteTimeNanoSecs = {0};
 
-    BufferListBySchema() {}
-
-    BufferListBySchema(SchemaId schemaId, uint32_t pageSize,
-                       uint32_t pageHeaderSize, uint32_t rowHeaderSize,
-                       PBRB *pbrbPtr, BufferPage *headPagePtr) {
-      bePBRBPtr = pbrbPtr;
-      headPage = headPagePtr;
-      tailPage = headPagePtr;
-    }
-    void setNullBitmapSize(uint32_t fieldNumber) {
-      nullableBitmapSize = (fieldNumber - 1) / 8 + 1;
-    }
-
-    void setOccuBitmapSize(uint32_t pageSize) {
-      occuBitmapSize = (pageSize / rowSize - 1) / 8 + 1;
-    }
-    void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize,
-                 uint32_t rowHeaderSize) {
-      // read from Schema
-      Schema* res = bePBRBPtr->_schemaUMap.find(schemaId);
-      if (res == nullptr) return;
-
-      ownSchema = res;
-      setNullBitmapSize(ownSchema->fields.size());
-
-      uint32_t currRowOffset = rowHeaderSize + nullableBitmapSize;
-
-      // Set Metadata
-      for (size_t i = 0; i < ownSchema->fields.size(); i++) {
-        FieldType currFT = ownSchema->fields[i].type;
-        FieldMetaData fieldObj;
-
-        fieldObj.fieldSize = FTSize[(uint8_t)(currFT)];
-        fieldObj.fieldOffset = currRowOffset;
-        fieldObj.isNullable = false;
-        fieldObj.isVariable = false;
-        fieldsInfo.push_back(fieldObj);
-        // Go to next field.
-        currRowOffset += fieldObj.fieldSize;
-      }
-
-      // set rowSize
-      // rowSize = currRowOffset;
-      rowSize = currRowOffset + sizeof(size_t);
-      setOccuBitmapSize(pageSize);
-      maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
-    }
-  };  // end of struct BufferListBySchema
-
-  friend struct BufferListBySchema;
-  std::map<SchemaId, BufferListBySchema> _bufferMap;
   TimeStamp _watermark;
 
-  // constructor
-  PBRB(int maxPageNumer, TimeStamp *wm, IndexerT *indexer,
-       uint32_t maxPageSearchNum);
-  ~PBRB();
+  // GC
+  bool _asyncGC = false;
+  std::chrono::microseconds _gcIntervalus = std::chrono::microseconds(50000);
+  uint64_t GCFailedTimes = 0;
+  uint64_t _retentionWindowSecs = 60;  // 1 minute
+  double _targetOccupancyRatio = 0.7;
+  double _startGCOccupancyRatio = 0.75;
+  double _hitThreshold = 0.3;
+  std::mutex _createCacheMutex;
 
-  BufferPage *getPageAddr(void *rowAddr);
-
-  // 1. Header 'set' and 'get' functions.
-  struct PageHeader {
-    char magic[2];
-    SchemaId schemaId;
-    SchemaVer schemaVer;
-    BufferPage *prevPagePtr;
-    BufferPage *nextpagePtr;
-    uint16_t howRowNum;
-    char reserved[38];
-  } __attribute__((packed));
-
-  // set (magic, 0, 2)
-  void setMagicPage(BufferPage *pagePtr, uint16_t magic);
-  // get (magic, 0, 2)
-  uint16_t getMagicPage(const BufferPage *pagePtr);
-
-  // set (schemaID, 2, 4)
-  void setSchemaIDPage(BufferPage *pagePtr, uint32_t schemaID);
-
-  // get (schemaID, 2, 4)
-  SchemaId getSchemaIDPage(const BufferPage *pagePtr);
-
-  // set (schemaVer, 6, 2)
-  void setSchemaVerPage(BufferPage *pagePtr, uint16_t schemaVer);
-
-  // get (schemaVer, 6, 2)
-  uint16_t getSchemaVerPage(const BufferPage *pagePtr);
-
-  // get (prevPagePtr, 8, 8)
-  void setPrevPage(BufferPage *pagePtr, BufferPage *prevPagePtr);
-
-  // set (prevPagePtr, 8, 8)
-  BufferPage *getPrevPage(const BufferPage *pagePtr);
-
-  // set (nextPagePtr, 16, 8)
-  void setNextPage(BufferPage *pagePtr, BufferPage *nextPagePtr);
-
-  // get (nextPagePtr, 16, 8)
-  BufferPage *getNextPage(const BufferPage *pagePtr);
-
-  // set (hotRowsNum, 24, 2)
-  void setHotRowsNumPage(BufferPage *pagePtr, uint16_t hotRowsNum);
-
-  // set (hotRowsNum, 24, 2)
-  uint16_t getHotRowsNumPage(const BufferPage *pagePtr);
-
-  void setReservedHeader(BufferPage *pagePtr);
-
-  void clearPageBitMap(BufferPage *pagePtr, uint32_t occuBitmapSize,
-                       uint32_t maxRowCnt);
-
-  // 1.2 Row get & set functions.
-
-  // Row Struct:
-  // CRC (4) | Timestamp (8) | PlogAddr (8) | KVNodeAddr(8)
-  // CRC:
-  uint32_t getCRCRow();
-  void setCRCRow();
-
-  // Timestamp: (RowAddr + 4, 8)
-  TimeStamp getTimestampRow(RowAddr rAddr);
-  void setTimestampRow(RowAddr rAddr, TimeStamp &ts);
-
-  // PlogAddr: (RowAddr + 12, 8)
-  void *getPlogAddrRow(RowAddr rAddr);
-  void setPlogAddrRow(RowAddr rAddr, void *PlogAddr);
-
-  // KVNodeAddr: (RowAddr + 20, 8)
-  void *getKVNodeAddrRow(RowAddr rAddr);
-  void setKVNodeAddrRow(RowAddr rAddr, void *KVNodeAddr);
-
-  // 2. Occupancy Bitmap functions.
-
-  // a bit for a row, page size = 64KB, row size = 128B, there are at most 512
-  // rows, so 512 bits=64 Bytes is sufficient
-  void setRowBitMapPage(BufferPage *pagePtr, RowOffset rowOffset);
-
-  void clearRowBitMapPage(BufferPage *pagePtr, RowOffset rowOffset);
-  void clearRowBitMap(BufferPage *pagePtr, RowOffset rowOffset);
-  inline bool isBitmapSet(BufferPage *pagePtr, RowOffset rowOffset);
-
-  // 3. Operations.
-  // 3.1 Initialize a schema.
-
-  void initializePage(BufferPage *pagePtr, BufferListBySchema &bmd);
-
+ public:
   // create a pageList for a SKV table according to schemaID
   BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer = 0);
+
+ private:
+  BufferPage *getPageAddr(void *rowAddr);
+
+  decltype(_freePageList) &getFreePageList() { return _freePageList; }
+
+  uint32_t getMaxPageNumber() { return _maxPageNumber; }
 
   BufferPage *AllocNewPageForSchema(SchemaId schemaId);
 
   BufferPage *AllocNewPageForSchema(SchemaId schemaId, BufferPage *pagePtr);
-
-  std::list<BufferPage *> getFreePageList() { return _freePageList; }
-
-  uint32_t getMaxPageNumber() { return _maxPageNumber; }
 
   float totalPageUsage() {
     return 1 - ((float)_freePageList.size() / (float)_maxPageNumber);
@@ -254,35 +243,16 @@ class PBRB {
   // move cold row in pAddress to PBRB and insert hot address into KVNode
   void *cacheColdRow(PmemAddress pAddress, Key key);
 
-  // Copy memory from plog to (pagePtr, rowOffset)
-  void *cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset,
-                         PmemAddress pAddress);
-
   // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
   void *cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr,
                            RowOffset rowOffset, ValuePtr *vPtr, void *nodePtr);
 
-  // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-  void *cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr,
-                                    RowOffset rowOffset, void *field,
-                                    size_t strSize, uint32_t fieldID,
-                                    bool isStr);
-
-  // Count the space utiliuzation of string fields for each schema
-  void countStringFeildUtilization(BufferPage *pagePtr, RowOffset rowOffset,
-                                   long &totalFieldsSize, long &totalStoreSize,
-                                   long &heapFieldNum, bool isPayloadRow);
-
-  // Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
-  void *cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr,
-                                      RowOffset rowOffset, Value *value);
-
   // find an empty slot between the beginOffset and endOffset in the page
-  RowOffset findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr,
-                                RowOffset beginOffset, RowOffset endOffset);
+  inline RowOffset findEmptySlotInPage(
+      std::shared_ptr<BufferListBySchema> &blbs, BufferPage *pagePtr,
+      RowOffset beginOffset = 0, RowOffset endOffset = UINT32_MAX);
 
   // find an empty slot in the page
-  RowOffset findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr);
 
   std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID);
   // record the search status
@@ -295,20 +265,17 @@ class PBRB {
 
   // Find the page pointer and row offset to cache cold row
   std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID,
-                                                          Key key);
+                                                          IndexerIterator iter);
 
-  // Find Cache Row Position From pagePtr to end
-  std::pair<BufferPage *, RowOffset> findCacheRowPosition(
-      uint32_t schemaID, BufferPage *pagePtr, FCRPSlowCaseStatus &stat);
-
-  // store hot row in the empty row
-  // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);
+  // Traverse cache list to find empty row from pagePtr
+  std::pair<BufferPage *, RowOffset> traverseFindEmptyRow(
+      uint32_t schemaID, BufferPage *pagePtr = nullptr,
+      uint32_t maxPageSearchingNum = UINT32_MAX);
 
   // return pagePtr and rowOffset.
-  std::pair<BufferPage *, RowOffset> findRowByAddr(void *rowAddr);
-
+  std::pair<BufferPage *, RowOffset> findPageAndRowByAddr(void *rowAddr);
+  RowAddr getAddrByPageAndRow(BufferPage *pagePtr, RowOffset rowOff);
   // evict row and return cold addr.
-  PmemAddress evictRow(void *rowAddr);
 
   // mark the row as unoccupied when evicting a hot row
   void removeHotRow(BufferPage *pagePtr, RowOffset offset);
@@ -351,6 +318,135 @@ class PBRB {
     }
     return;
   }
+
+ private:
+  // Staticstics:
+  // Hit Ratio
+  struct AccessStatistics {
+    uint64_t accessCount = 0;
+    uint64_t hitCount = 0;
+    uint64_t lastHitCount = 0;
+    std::vector<uint64_t> hitVec;
+    uint64_t interval = 200000;
+
+    inline bool updateVec() {
+      if (accessCount % interval == 0) {
+        hitVec.push_back(hitCount - lastHitCount);
+        lastHitCount = hitCount;
+        return true;
+      }
+      return false;
+    }
+    inline bool hit() {
+      accessCount++;
+      hitCount++;
+      return updateVec();
+    }
+    inline bool miss() {
+      accessCount++;
+      return updateVec();
+    }
+    inline double getHitRatio() {
+      if (accessCount > 0)
+        return (double)hitCount / accessCount;
+      else
+        return 2;
+    }
+    inline double getLastIntervalHitRatio() {
+      if (hitVec.size() == 0) {
+        return 0;
+      } else {
+        return (double)hitVec.back() / interval;
+      }
+    }
+  };
+
+  std::unordered_map<SchemaId, AccessStatistics> _AccStatBySchema;
+
+ public:
+  bool schemaHit(SchemaId sid) {
+    auto &accStat = _AccStatBySchema[sid];
+    if (accStat.hit())
+      ;  // traverseIdxGC();
+    return true;
+  }
+  bool schemaMiss(SchemaId sid) {
+    auto &accStat = _AccStatBySchema[sid];
+    if (accStat.miss())
+      ;  // traverseIdxGC();
+    return true;
+  }
+  double getHitRatio(SchemaId sid) {
+    auto it = _AccStatBySchema.find(sid);
+    if (it == _AccStatBySchema.end()) return -1;
+    return (double)(it->second.hitCount) / it->second.accessCount;
+  }
+
+  void outputHitRatios() {
+    for (auto &it : _AccStatBySchema) {
+      auto &hitVec = it.second.hitVec;
+      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratio: {} / {} = {:.2f}",
+                it.first, it.second.hitCount, it.second.accessCount,
+                (double)it.second.hitCount / it.second.accessCount);
+      std::string hitStr, ratioStr;
+      std::for_each(hitVec.begin(), hitVec.end(), [&](uint64_t x) {
+        fmt::format_to(std::back_inserter(hitStr), "{:8d} ", x);
+        fmt::format_to(std::back_inserter(ratioStr), "{:8.3f} ",
+                       (double)x / it.second.interval);
+      });
+
+      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
+                it.first, it.second.interval, hitStr);
+      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
+                it.first, it.second.interval, ratioStr);
+    }
+  }
+
+ private:
+  std::future<bool> _GCResult;
+  std::mutex _traverseIdxGCLock;
+  // GC
+ private:
+  bool _traverseIdxGCBySchema(SchemaId schemaid);
+  bool _reclaimEmptyPages(SchemaId schemaid);
+  inline bool _checkOccupancyRatio(double ratio);
+  inline double _getOccupancyRatio() {
+    return 1 - ((double)_freePageList.size() / _maxPageNumber);
+  }
+
+  void _stopGC();
+  bool _asyncTraverseIdxGC();
+  bool syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+                 const Value &value, IndexerIterator iter);
+  bool asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+                  const Value &value, IndexerIterator iter);
+  void asyncWriteHandler(decltype(&_asyncThreadPollList));
+
+ public:
+  bool traverseIdxGC();
+
+ public:
+  // constructor
+  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
+       SchemaUMap *umap, uint64_t retentionWindowSecs = 60,
+       uint32_t maxPageSearchNum = 5, bool async_pbrb = false,
+       bool enable_async_gc = false, double targetOccupancyRatio = 0.7,
+       uint64_t gcIntervalus = 100000, double hitThreshold = 0.3);
+  // dtor
+  ~PBRB();
+  bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
+            SchemaId schemaId, Value &value, ValuePtr *vPtr,
+            std::vector<uint32_t> fields = std::vector<uint32_t>());
+  bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+             const Value &value, IndexerIterator iter);
+
+  bool dropRow(RowAddr rAddr);
+
+  bool evictRow(IndexerIterator &iter);
+  // GTEST
+
+  friend class BufferListBySchema;
+  FRIEND_TEST(PBRBTest, Test01);
 };
 
 }  // namespace NKV

@@ -59,16 +59,19 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
     _plog_meta = *(PmemEngineConfig *)_plog_meta_file.pmem_addr;
     plog_meta = _plog_meta;
     for (uint64_t i = 0; i < _plog_meta.chunk_count; i++) {
-      std::string chunk_name = _genNewChunk();
+      std::string chunk_name = _genNewChunkName();
       char *plog_addr = nullptr;
       auto chunk_status = _mapExistingFile(chunk_name, &plog_addr);
+      _active_chunk_id.fetch_add(1);
       if (!chunk_status.is2xxOK()) {
         return chunk_status;
       }
       _chunk_list.push_back(
           {.file_name = std::move(chunk_name), .pmem_addr = plog_addr});
     }
-    _active_chunk_id = _plog_meta.tail_offset / _plog_meta.chunk_size;
+
+    _tail_offset.store(_plog_meta.tail_offset);
+    _active_chunk_id.store(_tail_offset.load() / _plog_meta.chunk_size);
   } else {
     _plog_meta = plog_meta;
     // write metadata to metaFile
@@ -85,30 +88,35 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
   return PmemStatuses::S201_Created_Engine;
 }
 
-Status PmemLog::append(PmemAddress &pmemAddr, char *value, uint32_t size) {
+Status PmemLog::append(PmemAddress &pmemAddr, const char *value,
+                       uint32_t size) {
   PmemSize append_size = size + sizeof(uint32_t);
   // checkout the is_sealed condition
   if (_plog_meta.is_sealed) {
     return PmemStatuses::S409_Conflict_Append_Sealed_engine;
   }
   // checkout the capacity
-  if (_plog_meta.tail_offset + append_size > _plog_meta.engine_capacity) {
+  if (_tail_offset.load() + append_size > _plog_meta.engine_capacity) {
     return PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
   }
-  _append((char *)value, size);
-  pmemAddr = _plog_meta.tail_offset - append_size;
+  pmemAddr = _append((char *)value, size);
   return PmemStatuses::S200_OK_Append;
 }
 
-
-
-Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
+Status PmemLog::write(PmemAddress writeAddr, const char *value, uint32_t size) {
+  if (writeAddr > _tail_offset.load()) {
+    return PmemStatuses::S403_Forbidden_Invalid_Offset;
+  }
+  _write(writeAddr, value, size);
+  return PmemStatuses::S200_OK_Write;
+}
+Status PmemLog::read(PmemAddress readAddr, std::string &value) {
   // checkout the effectiveness of start_offset
-  if (readAddr > _plog_meta.tail_offset) {
+  if (readAddr > _tail_offset.load()) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;
   }
   uint32_t read_size = 0;
-  _read((char*)&read_size, readAddr, sizeof(uint32_t));
+  _read((char *)&read_size, readAddr, sizeof(uint32_t));
 
   // checkout the effectiveness of read size
   uint64_t chunk_remaing_space =
@@ -116,17 +124,15 @@ Status PmemLog::read(const PmemAddress &readAddr, std::string &value) {
   if (chunk_remaing_space < read_size) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
-  if (readAddr + read_size > _plog_meta.tail_offset) {
+  if (readAddr + read_size > _tail_offset.load()) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
   // pass the check
   value.resize(read_size);
   _read((char *)value.data(), readAddr + sizeof(uint32_t), read_size);
 
-
   return PmemStatuses::S200_OK_Found;
 }
-
 
 Status PmemLog::seal() {
   if (_plog_meta.is_sealed == false) {
@@ -136,9 +142,9 @@ Status PmemLog::seal() {
   }
 }
 uint64_t PmemLog::getFreeSpace() {
-  return _plog_meta.engine_capacity - _plog_meta.tail_offset;
+  return _plog_meta.engine_capacity - _tail_offset.load();
 }
 
-uint64_t PmemLog::getUsedSpace() { return _plog_meta.tail_offset; };
+uint64_t PmemLog::getUsedSpace() { return _tail_offset.load(); };
 
 }  // namespace NKV

@@ -18,6 +18,7 @@
 #include <vector>
 #include "logging.h"
 #include "pmem_engine.h"
+#include "schema.h"
 
 namespace NKV {
 
@@ -26,6 +27,8 @@ class PmemLog : public PmemEngine {
   PmemLog() {}
 
   ~PmemLog() {
+    _plog_meta.tail_offset = _tail_offset.load();
+
     if (_is_pmem) {
       _copyToPmem(_plog_meta_file.pmem_addr, (char *)&_plog_meta,
                   sizeof(_plog_meta));
@@ -42,9 +45,13 @@ class PmemLog : public PmemEngine {
 
   Status init(PmemEngineConfig &plog_meta) override;
 
-  Status append(PmemAddress &pmemAddr, char *value, uint32_t size) override;
+  Status append(PmemAddress &pmemAddr, const char *value,
+                uint32_t size) override;
 
-  Status read(const PmemAddress &readAddr, std::string &value) override;
+  Status write(PmemAddress writeAddr, const char *value,
+               uint32_t size) override;
+
+  Status read(PmemAddress readAddr, std::string &value) override;
 
   Status seal() override;
 
@@ -54,34 +61,54 @@ class PmemLog : public PmemEngine {
 
  private:
   // private _append function to write srcdata to plog
-  inline void _append(char *srcdata, size_t len) {
-    NKV_LOG_D(std::cout, "Write data: len=>{}", len);
-    uint64_t chunk_remaing_space =
-        _plog_meta.chunk_size - _plog_meta.tail_offset % _plog_meta.chunk_size;
-    uint32_t head_size = sizeof(uint32_t);
-    if (chunk_remaing_space < len + head_size) {
+  inline PmemAddress _append(char *srcdata, size_t len) {
+    constexpr uint32_t head_size = sizeof(uint32_t);
+    uint64_t now_tail_offset = _tail_offset.fetch_add(len + head_size);
+    if ((1 + _active_chunk_id.load()) * _plog_meta.chunk_size <
+        now_tail_offset + len + head_size) {
+      _mutex.lock();
       _addNewChunk();
+      now_tail_offset = _tail_offset.fetch_add(len + head_size);
+      _mutex.unlock();
     }
 
-    char *pmem_addr = _chunk_list[_active_chunk_id].pmem_addr +
-                      _plog_meta.tail_offset % _plog_meta.chunk_size;
-    *(uint32_t*)pmem_addr = len;
-    pmem_addr += head_size;
+    char *pmem_addr =
+        _chunk_list[now_tail_offset / _plog_meta.chunk_size].pmem_addr +
+        now_tail_offset % _plog_meta.chunk_size;
+    NKV_LOG_D(std::cout,
+              "Append data: len=>{} to offset=>{}, activate chunk id=>{}", len,
+              now_tail_offset, _active_chunk_id.load());
+
+    *(uint32_t *)pmem_addr = len;
     if (_is_pmem) {
-      _copyToPmem(pmem_addr, srcdata, len);
+      _copyToPmem(pmem_addr + head_size, srcdata, len);
     } else {
-      _copyToNonPmem(pmem_addr, srcdata, len);
+      _copyToNonPmem(pmem_addr + head_size, srcdata, len);
     }
-    _plog_meta.tail_offset += len + head_size;
+    // atomic modify the tail_offset variable
+    return now_tail_offset;
   }
 
   // private _read function to read data from given offset and length
-  inline void _read(char *dst, uint64_t offset, uint64_t len) {
-    NKV_LOG_D(std::cout, "Read data: offset =>{},len=>{}", offset, len);
-    uint32_t chunk_id = offset / _plog_meta.chunk_size;
+  inline void _read(char *dst, PmemAddress src, uint32_t len) {
+    NKV_LOG_D(std::cout, "Read data: offset =>{},len=>{}", src, len);
+    uint32_t chunk_id = src / _plog_meta.chunk_size;
     char *pmem_addr =
-        _chunk_list[chunk_id].pmem_addr + offset % _plog_meta.chunk_size;
+        _chunk_list[chunk_id].pmem_addr + src % _plog_meta.chunk_size;
     memcpy(dst, pmem_addr, len);
+  }
+
+  inline void _write(PmemAddress dst, const char *src, uint32_t len) {
+    NKV_LOG_D(std::cout, "Write data: offset =>{},len=>{}", dst, len);
+    uint32_t chunk_id = dst / _plog_meta.chunk_size;
+    char *pmem_addr =
+        _chunk_list[chunk_id].pmem_addr + dst % _plog_meta.chunk_size;
+    uint32_t head_size = sizeof(uint32_t);
+    if (_is_pmem) {
+      _copyToPmem(pmem_addr + head_size, src, len);
+    } else {
+      _copyToNonPmem(pmem_addr + head_size, src, len);
+    }
   }
 
   // Map an existing file
@@ -127,25 +154,32 @@ class PmemLog : public PmemEngine {
     return PmemStatuses::S201_Created_File;
   }
   inline Status _addNewChunk() {
-    std::lock_guard<std::mutex> guard(_mutex);
-    std::string chunk_name = _genNewChunk();
+    if (_tail_offset.load() <
+        (_active_chunk_id.load() + 1) * _plog_meta.chunk_size) {
+      return PmemStatuses::S201_Created_File;
+    }
+    std::string chunk_name = _genNewChunkName();
     char *chunk_addr = nullptr;
     auto chunk_status =
         _createThenMapFile(chunk_name, _plog_meta.chunk_size, &chunk_addr);
     _plog_meta.chunk_count++;
-    _plog_meta.tail_offset = _plog_meta.chunk_size * _active_chunk_id.load();
     if (!chunk_status.is2xxOK()) {
       return chunk_status;
     }
     _chunk_list.push_back(
         {.file_name = std::move(chunk_name), .pmem_addr = chunk_addr});
+
+    _active_chunk_id.fetch_add(1);
+    _tail_offset.store(_plog_meta.chunk_size * _active_chunk_id.load());
+    NKV_LOG_D(std::cout,
+              "generate new chunk, now active chunk id:{}, tail offset:{}",
+              _active_chunk_id.load(), _tail_offset.load());
     return PmemStatuses::S201_Created_File;
   }
   // generate the new chunk name
-  inline std::string _genNewChunk() {
-    _active_chunk_id.fetch_add(1);
+  inline std::string _genNewChunkName() {
     return fmt::format("{}/{}_{}.plog", _plog_meta.engine_path,
-                       _plog_meta.plog_id, _active_chunk_id);
+                       _plog_meta.plog_id, _active_chunk_id.load() + 1);
   }
 
   // generate the metadata file name
@@ -180,6 +214,7 @@ class PmemLog : public PmemEngine {
 
   // the current activate chunk id
   std::atomic<int> _active_chunk_id{-1};
+  std::atomic<uint64_t> _tail_offset{0};
 
   // record all the information of chunks
   std::vector<FileInfo> _chunk_list;

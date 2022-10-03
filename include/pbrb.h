@@ -210,7 +210,8 @@ class PBRB {
   bool _async_pbrb = false;
   std::map<SchemaId, std::shared_ptr<AsyncBufferQueue>> _asyncQueueMap;
 
-  oneapi::tbb::concurrent_vector<std::shared_ptr<AsyncBufferQueue>> _asyncThreadPollList;
+  oneapi::tbb::concurrent_vector<std::shared_ptr<AsyncBufferQueue>>
+      _asyncThreadPollList;
   std::thread _asyncThread;
   std::atomic_uint32_t _isAsyncRunning{0};
 
@@ -427,7 +428,8 @@ class PBRB {
 
  public:
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
-            SchemaId schemaId, Value &value, ValuePtr *vPtr);
+            SchemaId schemaId, Value &value, ValuePtr *vPtr,
+            std::vector<uint32_t> fields = std::vector<uint32_t>());
   bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
              const Value &value, IndexerIterator iter);
 

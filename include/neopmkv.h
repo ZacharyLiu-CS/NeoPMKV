@@ -24,8 +24,8 @@ class NeoPMKV {
  public:
   NeoPMKV(std::string db_path = "/mnt/pmem0/tmp-neopmkv",
           uint64_t chunk_size = 16ULL << 20, uint64_t db_size = 16ULL << 30,
-          bool enable_pbrb = false, bool async_pbrb = false, bool enable_async_gc = false,
-          uint32_t maxPageNum = 1ull << 18) {
+          bool enable_pbrb = false, bool async_pbrb = false,
+          bool enable_async_gc = false, uint32_t maxPageNum = 1ull << 18) {
     _enable_pbrb = enable_pbrb;
     _async_pbrb = async_pbrb;
 
@@ -61,13 +61,14 @@ class NeoPMKV {
         _schemaAllocator.createSchema(name, primarykey_id, fields);
     _sUMap.addSchema(newSchema);
     _indexerList.insert({newSchema.schemaId, std::make_shared<IndexerT>()});
-    if(_enable_pbrb == true){
+    if (_enable_pbrb == true) {
       _pbrb->createCacheForSchema(newSchema.schemaId);
     }
     return newSchema.schemaId;
   }
 
-  bool get(Key &key, Value &value);
+  bool get(Key &key, Value &value,
+           std::vector<uint32_t> fields = std::vector<uint32_t>());
   bool put(Key &key, const Value &value);
   // bool partial_get(Key &key,std::vector<> Value &value);
   bool update(Key &key,
@@ -75,7 +76,8 @@ class NeoPMKV {
   bool update(Key &key, std::vector<std::pair<uint32_t, std::string>> &values);
 
   bool remove(Key &key);
-  bool scan(Key &start, std::vector<Value> &value_list, uint32_t scan_len);
+  bool scan(Key &start, std::vector<Value> &value_list, uint32_t scan_len,
+            std::vector<uint32_t> fields = std::vector<uint32_t>());
 
  private:
   bool checkSchemaIdValid(SchemaId id) {
@@ -83,7 +85,8 @@ class NeoPMKV {
   }
   bool getValueFromIndexIterator(IndexerIterator &idxIter,
                                  std::shared_ptr<IndexerT> indexer,
-                                 SchemaId schemaid, Value &value);
+                                 SchemaId schemaid, Value &value,
+                                 std::vector<uint32_t> &fields);
   // use store the key -> valueptr
   IndexerList _indexerList;
   // use to allocate schema

@@ -19,7 +19,8 @@
 namespace NKV {
 bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
                                         std::shared_ptr<IndexerT> indexer,
-                                        SchemaId schemaid, Value &value) {
+                                        SchemaId schemaid, Value &value,
+                                        std::vector<uint32_t> &fields) {
   if (idxIter == indexer->end()) {
     return false;
   }
@@ -37,12 +38,14 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     PointProfiler _timer;
     _timer.start();
 #endif
-    bool status = _pbrb->read(oldTS, newTS,vPtr.getPBRBAddr(), schemaid, value, &vPtr);
+    bool status = _pbrb->read(oldTS, newTS, vPtr.getPBRBAddr(), schemaid, value,
+                              &vPtr, fields);
 #ifdef ENABLE_STATISTICS
     _timer.end();
     _durationStat.pbrbReadCount.fetch_add(1);
     _durationStat.pbrbReadTimeNanoSecs.fetch_add(_timer.duration());
 #endif
+
     return true;
   }
 
@@ -58,6 +61,12 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   _durationStat.pmemReadTimeNanoSecs.fetch_add(_timer.duration());
 #endif
   if (_enable_pbrb == false) {
+    if (fields.size() != 0) {
+      auto schema = _sUMap.find(schemaid);
+      auto field_offset = schema->getPBRBOffset(fields[0]);
+      auto field_size = schema->getSize(fields[0]) + FieldHeadSize;
+      value = value.substr(field_offset, field_size);
+    }
     return true;
   }
   TimeStamp newTs;
@@ -73,10 +82,16 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   _durationStat.pbrbWriteCount.fetch_add(1);
   _durationStat.pbrbWriteTimeNanoSecs.fetch_add(_timer.duration());
 #endif
+  if (fields.size() != 0) {
+    auto schema = _sUMap.find(schemaid);
+    auto field_offset = schema->getPBRBOffset(fields[0]);
+    auto field_size = schema->getSize(fields[0]) + FieldHeadSize;
+    value = value.substr(field_offset, field_size);
+  }
   return true;
 }
 
-bool NeoPMKV::get(Key &key, std::string &value) {
+bool NeoPMKV::get(Key &key, std::string &value, std::vector<uint32_t> fields) {
   if (checkSchemaIdValid(key.schemaId) == false) {
     return false;
   }
@@ -96,7 +111,8 @@ bool NeoPMKV::get(Key &key, std::string &value) {
 #endif
   // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
   //           idxIter->second);
-  return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value);
+  return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value,
+                                   fields);
 }
 
 bool NeoPMKV::put(Key &key, const std::string &value) {
@@ -251,7 +267,7 @@ bool NeoPMKV::remove(Key &key) {
   return true;
 }
 bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
-                   uint32_t scan_len) {
+                   uint32_t scan_len, std::vector<uint32_t> fields) {
   if (checkSchemaIdValid(start.schemaId) == false) {
     return false;
   }
@@ -271,7 +287,7 @@ bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
 #endif
   for (auto i = 0; i < scan_len && iter != indexer->end(); i++, iter++) {
     std::string tmp_value;
-    getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value);
+    getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value, fields);
     value_list.push_back(tmp_value);
   }
   return true;

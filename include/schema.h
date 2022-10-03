@@ -27,7 +27,7 @@ using SchemaVer = uint16_t;
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
 const uint32_t PmemEntryHead = sizeof(uint32_t);
-
+const uint32_t FieldHeadSize = sizeof(uint32_t);
 using RowAddr = void *;
 const uint32_t ERRMASK = 1 << 31;
 
@@ -209,7 +209,6 @@ struct Schema {
         fields(fields) {
     (void)getSize();
     uint32_t currentOffset = 0;
-    uint32_t fieldHeadSize = sizeof(uint32_t);
     for (auto i : fields) {
       fieldsMeta.push_back(FieldMetaData());
       auto &field_meta = fieldsMeta.back();
@@ -217,7 +216,7 @@ struct Schema {
       field_meta.fieldOffset = currentOffset;
       field_meta.isNullable = false;
       field_meta.isVariable = false;
-      currentOffset += i.size + fieldHeadSize;
+      currentOffset += i.size + FieldHeadSize;
     }
   }
   uint32_t getSize() {
@@ -226,11 +225,13 @@ struct Schema {
     for (auto i : fields) size += i.size + sizeof(uint32_t);
     return size;
   }
+  inline uint32_t getSize(uint32_t fieldId) {
+    return fieldsMeta[fieldId].fieldSize;
+  }
 
   inline uint32_t getPmemOffset(uint32_t fieldId) {
     return fieldsMeta[fieldId].fieldOffset + PmemEntryHead;
   }
-
   inline uint32_t getPmemOffset(const std::string &fieldName) {
     uint32_t fieldId = 0;
     for (auto i : fields) {
@@ -238,6 +239,18 @@ struct Schema {
       fieldId += 1;
     }
     return getPmemOffset(fieldId);
+  }
+
+  inline uint32_t getPBRBOffset(uint32_t fieldId) {
+    return fieldsMeta[fieldId].fieldOffset;
+  }
+  inline uint32_t getPBRBOffset(const std::string &fieldName) {
+    uint32_t fieldId = 0;
+    for (auto i : fields) {
+      if (i.name == fieldName) return fieldId;
+      fieldId += 1;
+    }
+    return getPBRBOffset(fieldId);
   }
 };
 

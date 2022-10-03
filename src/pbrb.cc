@@ -413,14 +413,28 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 // Extern interfaces:
 
 bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
-                SchemaId schemaid, Value &value, ValuePtr *vPtr) {
+                SchemaId schemaid, Value &value, ValuePtr *vPtr,
+                std::vector<uint32_t> fields) {
   BufferPage *pagePtr = getPageAddr(addr);
   auto &blbs = _bufferMap[schemaid];
   if (vPtr->setHotTimeStamp(oldTS, newTS) == false) {
     return false;
   }
   pagePtr->setTimestampRow(addr, newTS);
-  pagePtr->getValueRow(addr, blbs->valueSize, value);
+  if (fields.size() == 0) {
+    pagePtr->getValueRow(addr, blbs->valueSize, value);
+  } else {
+    auto schema = _schemaUMap->find(schemaid);
+    std::vector<std::pair<uint32_t, uint32_t>> value_fields;
+    uint32_t value_size = 0;
+    for (auto field_id : fields) {
+      uint32_t field_offset = schema->getPBRBOffset(field_id);
+      uint32_t field_size = schema->getSize(field_id);
+      value_fields.push_back({field_offset, field_size});
+      value_size += field_size + FieldHeadSize;
+    }
+    pagePtr->getValueRow(addr, value_size, value, value_fields);
+  }
   NKV_LOG_D(std::cout,
             "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
             oldTS, value, value.size());

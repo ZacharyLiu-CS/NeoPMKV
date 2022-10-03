@@ -44,7 +44,8 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
 
   NKV::NeoPMKV *neopmkv_ = nullptr;
   if (neopmkv_ == nullptr) {
-    neopmkv_ = new NKV::NeoPMKV(db_path, chunk_size, db_size, enablePBRB, asyncPBRB);
+    neopmkv_ =
+        new NKV::NeoPMKV(db_path, chunk_size, db_size, enablePBRB, asyncPBRB);
   }
   SchemaId sid = neopmkv_->createSchema(Fields, 0, "test1");
 
@@ -55,6 +56,14 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
   auto BuildValue = [](uint64_t i) -> Value {
     std::string num_str = std::to_string(i);
     int zero_padding = 44 - num_str.size();
+    Value v;
+    v.append(zero_padding, '0').append(num_str);
+    return v;
+  };
+
+  auto BuildPartialValue = [](uint64_t i) -> Value {
+    std::string num_str = std::to_string(i);
+    int zero_padding = 20 - num_str.size();
     Value v;
     v.append(zero_padding, '0').append(num_str);
     return v;
@@ -82,20 +91,13 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
     auto value = BuildValue(i);
     neopmkv_->put(key, value);
   }
+  std::vector<uint32_t> fields{2};
   // test the get the operation
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
-    auto expect_value = BuildValue(i);
+    auto expect_value = BuildPartialValue(i);
     Value read_value;
-    neopmkv_->get(key, read_value);
-    ASSERT_EQ(read_value, expect_value);
-  }
-  // Add a get round (read from PBRB)
-  for (uint64_t i = 0; i < length; i++) {
-    auto key = BuildKey(i);
-    auto expect_value = BuildValue(i);
-    Value read_value;
-    neopmkv_->get(key, read_value);
+    neopmkv_->get(key, read_value, fields);
     // if( read_value != expect_value){
     //   std::cout<< i<< " read value:   " << read_value << std::endl;
     //   std::cout<< i<< " expect value: " << expect_value << std::endl;
@@ -103,7 +105,20 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
     // }
     ASSERT_EQ(read_value, expect_value);
   }
-  
+  // Add a get round (read from PBRB)
+  for (uint64_t i = 0; i < length; i++) {
+    auto key = BuildKey(i);
+    auto expect_value = BuildPartialValue(i);
+    Value read_value;
+    neopmkv_->get(key, read_value, fields);
+    // if( read_value != expect_value){
+    // std::cout<< i<< " read value:   " << read_value << std::endl;
+    // std::cout<< i<< " expect value: " << expect_value << std::endl;
+    // std::cout<< "----"<< std::endl;
+    // }
+    ASSERT_EQ(read_value, expect_value);
+  }
+
   // test the update correctness
   for (uint64_t i = 0; i < length; i++) {
     auto key = BuildKey(i);
@@ -131,12 +146,13 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
     bool res = neopmkv_->get(key, read_value);
     if (i < remove_length)
       ASSERT_EQ(false, res);
-    else{
+    else {
       if (read_value != expect_value)
-      NKV_LOG_E(std::cerr, "value [{}]:read_value: {} expect_value: {}", i,read_value, expect_value);
+        NKV_LOG_E(std::cerr, "value [{}]:read_value: {} expect_value: {}", i,
+                  read_value, expect_value);
     }
 
-      // ASSERT_EQ(read_value, expect_value);
+    // ASSERT_EQ(read_value, expect_value);
   }
   Key start_key = BuildKey(1);
   std::vector<Value> value_list;
@@ -148,7 +164,7 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
               i + remove_length, expect_value, value_list[i]);
     ASSERT_EQ(expect_value, value_list[i]);
   }
-  
+
   delete neopmkv_;
 }
 TEST(NEOPMKVTEST, DisablePBRBTest) {
@@ -173,7 +189,8 @@ TEST(NEOPMKVTEST, TimeStaticsTest) {
   NKV::NeoPMKV *neopmkv_ = nullptr;
   if (neopmkv_ == nullptr) {
     neopmkv_ =
-        new NKV::NeoPMKV(db_path, chunk_size, db_size, true, false, true, 1ull << 14);
+        new NKV::NeoPMKV(db_path, chunk_size, db_size, true, false, true, 1ull
+<< 14);
   }
   SchemaId sid = neopmkv_->createSchema(Fields, 0, "test1");
 

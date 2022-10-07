@@ -92,6 +92,7 @@ set(GTEST_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/in
 set(GTEST_MAIN_LIBRARY ${GTEST_LIBRARY})
 
 #10. compile test files
+if(BUILD_TESTS)
 find_package(GTest)
 enable_testing()
 if (GTEST_FOUND)
@@ -109,25 +110,4 @@ if (GTEST_FOUND)
     add_test(NAME ${testname} COMMAND ${testname})
   ENDFOREACH(testsourcefile ${TEST_FILE})
 endif()
-
-  #11. compile test files
-  find_package(GTest)
-  enable_testing()
-  if (GTEST_FOUND)
-    file(GLOB TEST_FILE ${PROJECT_SOURCE_DIR}/tests/*.cc)
-    foreach(testsourcefile ${TEST_FILE})
-      string(REGEX MATCH "[^/]+$" testsourcefilewithoutpath ${testsourcefile})
-      string(REPLACE ".cc" "" testname ${testsourcefilewithoutpath})
-      add_executable( ${testname} ${testsourcefile} ${SOURCE_FILE})
-      target_link_libraries(${testname}
-        pthread
-        pmem
-        gtest
-        fmt::fmt
-        TBB::tbb
-        )
-      add_test(NAME ${testname} COMMAND ${testname})
-    ENDFOREACH(testsourcefile ${TEST_FILE})
-  endif()
-
 endif(BUILD_TESTS)

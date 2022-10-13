@@ -106,6 +106,7 @@ if (GTEST_FOUND)
       pmem
       gtest
       fmt::fmt
+      TBB::tbb
       )
     add_test(NAME ${testname} COMMAND ${testname})
   ENDFOREACH(testsourcefile ${TEST_FILE})

@@ -50,7 +50,7 @@ const uint32_t pbrbAsyncQueueSize = 32;
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = std::map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerT = oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
 using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
 using IndexerIterator = IndexerT::iterator;
 
@@ -213,9 +213,9 @@ class PBRB {
 
   // GC
   bool _asyncGC = false;
-  std::chrono::microseconds _gcIntervalus = std::chrono::microseconds(50000);
+  std::chrono::microseconds _gcIntervalMicrosecs = std::chrono::microseconds(50000);
   uint64_t GCFailedTimes = 0;
-  uint64_t _retentionWindowSecs = 60;  // 1 minute
+  uint64_t _retentionWindowMicrosecs = 10;  
   double _targetOccupancyRatio = 0.7;
   double _startGCOccupancyRatio = 0.75;
   double _hitThreshold = 0.3;
@@ -428,10 +428,10 @@ class PBRB {
  public:
   // constructor
   PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-       SchemaUMap *umap, uint64_t retentionWindowSecs = 60,
+       SchemaUMap *umap, uint64_t retentionWindowMicrosecs = 2000,
        uint32_t maxPageSearchNum = 5, bool async_pbrb = false,
        bool enable_async_gc = false, double targetOccupancyRatio = 0.7,
-       uint64_t gcIntervalus = 100000, double hitThreshold = 0.3);
+       uint64_t gcIntervalMicrosecs = 100000, double hitThreshold = 0.3);
   // dtor
   ~PBRB();
   bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,

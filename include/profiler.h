@@ -30,19 +30,21 @@
 
 #define TSC_Hz (2095078ull * 1000)
 #define NANOSEC_BASE 1000000000
+#define MICROSEC_BASE 1000000
 
 #define PERCISION (1ull << 20)
 
-constexpr uint64_t tsc_percision = TSC_Hz/PERCISION;
+constexpr uint64_t tsc_percision = TSC_Hz / PERCISION;
 constexpr uint64_t nano_percision = NANOSEC_BASE / PERCISION;
 
 inline uint64_t getTicksByNanosecs(uint64_t nanoseconds) {
-  return ((uint64_t)(nanoseconds) * (tsc_percision)) /
-         (nano_percision);
+  // return ((uint64_t)(nanoseconds) * (tsc_percision)) / (nano_percision);
+  return nanoseconds << 1;
 }
 inline uint64_t getNanoSecsByTicks(uint64_t ticks) {
-  return ((uint64_t)(ticks) * (nano_percision)) /
-         (tsc_percision);
+  // return ((uint64_t)(ticks) * (nano_percision)) /
+  //  (tsc_percision);
+  return ticks >> 1;
 }
 inline uint64_t rte_rdtsc() {
   union {

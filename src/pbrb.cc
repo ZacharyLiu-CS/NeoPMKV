@@ -11,12 +11,13 @@
 #include <mutex>
 #include <thread>
 #include "logging.h"
+#include "profiler.h"
 
 namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-           SchemaUMap *umap, uint64_t retentionWindowSecs,
+           SchemaUMap *umap, uint64_t retentionWindowMicrosecs,
            uint32_t maxPageSearchNum, bool async_pbrb, bool enable_async_gc,
-           double targetOccupancyRatio, uint64_t gcIntervalus,
+           double targetOccupancyRatio, uint64_t gcIntervalMicrosecs,
            double hitThreshold) {
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
   // initialization
@@ -26,11 +27,11 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
   _maxPageNumber = maxPageNumber;
   _indexListPtr = indexerListPtr;
   _maxPageSearchingNum = maxPageSearchNum;
-  _retentionWindowSecs = retentionWindowSecs;
+  _retentionWindowMicrosecs = retentionWindowMicrosecs;
   _async_pbrb = async_pbrb;
-  _gcIntervalus = std::chrono::microseconds(gcIntervalus);
+  _gcIntervalMicrosecs = std::chrono::microseconds(gcIntervalMicrosecs);
   _targetOccupancyRatio = targetOccupancyRatio;
-  _startGCOccupancyRatio = targetOccupancyRatio + 0.5;
+  _startGCOccupancyRatio = targetOccupancyRatio + 0.05;
   _asyncGC = enable_async_gc;
   _hitThreshold = hitThreshold;
   // allocate bufferpage
@@ -56,6 +57,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
 
 PBRB::~PBRB() {
   _isAsyncRunning.store(0, std::memory_order_release);
+  std::this_thread::sleep_for(std::chrono::microseconds(100));
   NKV_LOG_I(
       std::cout,
       "PBRB: Async Write Count: {}, Total Time Cost: {:.2f} s, Average Time "
@@ -617,15 +619,17 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
   // Adjust retention window size
   TimeStamp watermark = startTS;
   double occupancyRatio = _bufferMap.at(schemaid)->getOccupancyRatio();
+  double lastIntervalHitRatio =
+      _AccStatBySchema[schemaid].getLastIntervalHitRatio();
   if (occupancyRatio == 0) return false;
-  uint64_t moveNanoSecs = (double)_retentionWindowSecs * NANOSEC_BASE *
-                          exp2(-GCFailedTimes) * (1 - occupancyRatio) /
-                          (1 - _targetOccupancyRatio);
+  uint64_t moveNanoSecs = (double)_retentionWindowMicrosecs * MICROSEC_BASE *
+                          lastIntervalHitRatio * exp2(-GCFailedTimes) *
+                          (1 - occupancyRatio) / (1 - _targetOccupancyRatio);
   watermark.moveBackward(getTicksByNanosecs(moveNanoSecs));
   NKV_LOG_I(std::cout,
             "Start to GC schema id: {}, startTS: {}, watermark: {}, "
-            "_retentionWindowSecs: {}s",
-            schemaid, startTS, watermark, _retentionWindowSecs);
+            "_retentionWindowMicrosecs: {}μs",
+            schemaid, startTS, watermark, _retentionWindowMicrosecs);
   NKV_LOG_I(std::cout, "Occupancy Ratio: {:.4f}, real moved nanoSecs:{:12d}",
             occupancyRatio, moveNanoSecs);
 
@@ -663,7 +667,7 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
 bool PBRB::_asyncTraverseIdxGC() {
   while (_isGCRunning.load(std::memory_order_acquire)) {
     if (_checkOccupancyRatio(_startGCOccupancyRatio)) {
-      std::this_thread::sleep_for(_gcIntervalus);
+      std::this_thread::sleep_for(_gcIntervalMicrosecs);
       // std::this_thread::yield();
     } else {
       std::lock_guard<std::mutex> guard(_traverseIdxGCLock);

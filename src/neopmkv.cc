@@ -92,9 +92,10 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
 }
 
 bool NeoPMKV::get(Key &key, std::string &value, std::vector<uint32_t> fields) {
-  if (checkSchemaIdValid(key.schemaId) == false) {
-    return false;
-  }
+#ifdef ENABLE_STATISTICS
+  PointProfiler getTimer;
+  getTimer.start();
+#endif
   auto indexer = _indexerList[key.schemaId];
 
 #ifdef ENABLE_STATISTICS
@@ -111,14 +112,29 @@ bool NeoPMKV::get(Key &key, std::string &value, std::vector<uint32_t> fields) {
 #endif
   // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
   //           idxIter->second);
-  return getValueFromIndexIterator(idxIter, indexer, key.schemaId, value,
-                                   fields);
+#ifdef ENABLE_STATISTICS
+  PointProfiler _overallTimer;
+  _overallTimer.start();
+#endif
+  bool status =
+      getValueFromIndexIterator(idxIter, indexer, key.schemaId, value, fields);
+
+#ifdef ENABLE_STATISTICS
+  _overallTimer.end();
+  _durationStat.GetValueFromIteratorCount.fetch_add(1);
+  _durationStat.GetValueFromIteratorTimeNanoSecs.fetch_add(
+      _overallTimer.duration());
+#endif
+#ifdef ENABLE_STATISTICS
+  getTimer.end();
+  _durationStat.GetInterfaceCount.fetch_add(1);
+  _durationStat.GetInterfaceTimeNanoSecs.fetch_add(getTimer.duration());
+#endif
+  return status;
 }
 
 bool NeoPMKV::put(Key &key, const std::string &value) {
-  if (checkSchemaIdValid(key.schemaId) == false) {
-    return false;
-  }
+
   auto indexer = _indexerList[key.schemaId];
 
   PmemAddress pmAddr;
@@ -165,9 +181,7 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
 }
 bool NeoPMKV::update(Key &key,
                      std::vector<std::pair<std::string, std::string>> &values) {
-  if (checkSchemaIdValid(key.schemaId) == false) {
-    return false;
-  }
+
   auto indexer = _indexerList[key.schemaId];
 #ifdef ENABLE_STATISTICS
   PointProfiler _timer;
@@ -207,9 +221,6 @@ bool NeoPMKV::update(Key &key,
 }
 bool NeoPMKV::update(Key &key,
                      std::vector<std::pair<uint32_t, std::string>> &values) {
-  if (checkSchemaIdValid(key.schemaId) == false) {
-    return false;
-  }
   auto indexer = _indexerList[key.schemaId];
 
 #ifdef ENABLE_STATISTICS
@@ -250,9 +261,6 @@ bool NeoPMKV::update(Key &key,
   return true;
 }
 bool NeoPMKV::remove(Key &key) {
-  if (checkSchemaIdValid(key.schemaId) == false) {
-    return false;
-  }
   auto indexer = _indexerList[key.schemaId];
 
   IndexerIterator idxIter = indexer->find(key.primaryKey);
@@ -263,14 +271,12 @@ bool NeoPMKV::remove(Key &key) {
   if (isHot) {
     _pbrb->dropRow(idxIter->second.getPBRBAddr());
   }
-  indexer->erase(idxIter);
+  indexer->unsafe_erase(idxIter);
   return true;
 }
 bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
                    uint32_t scan_len, std::vector<uint32_t> fields) {
-  if (checkSchemaIdValid(start.schemaId) == false) {
-    return false;
-  }
+
   auto indexer = _indexerList[start.schemaId];
 
 #ifdef ENABLE_STATISTICS
@@ -285,17 +291,47 @@ bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
   _durationStat.indexQueryCount.fetch_add(1);
   _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
 #endif
+
+#ifdef ENABLE_STATISTICS
+  PointProfiler _overallTimer;
+  _overallTimer.start();
+#endif
+
   for (auto i = 0; i < scan_len && iter != indexer->end(); i++, iter++) {
     std::string tmp_value;
     getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value, fields);
     value_list.push_back(tmp_value);
   }
+#ifdef ENABLE_STATISTICS
+  _overallTimer.end();
+  _durationStat.GetValueFromIteratorCount.fetch_add(scan_len);
+  _durationStat.GetValueFromIteratorTimeNanoSecs.fetch_add(
+      _overallTimer.duration());
+#endif
   return true;
 }
 #ifdef ENABLE_STATISTICS
 void NeoPMKV::outputReadStat() {
   NKV_LOG_I(std::cout, " Enable pbrb: {}, async pbrb: {}", _enable_pbrb,
             _async_pbrb);
+  NKV_LOG_I(
+      std::cout,
+      "Get Interface Count: {}, Total Time Cost: {:.2f} "
+      "s, Average Time "
+      "Cost: {:.2f} ns",
+      _durationStat.GetInterfaceCount.load(),
+      _durationStat.GetInterfaceTimeNanoSecs.load() / (double)NANOSEC_BASE,
+      _durationStat.GetInterfaceTimeNanoSecs.load() /
+          (double)_durationStat.GetInterfaceCount.load());
+  NKV_LOG_I(std::cout,
+            "GetValue from Index Iterator Count: {}, Total Time Cost: {:.2f} "
+            "s, Average Time "
+            "Cost: {:.2f} ns",
+            _durationStat.GetValueFromIteratorCount.load(),
+            _durationStat.GetValueFromIteratorTimeNanoSecs.load() /
+                (double)NANOSEC_BASE,
+            _durationStat.GetValueFromIteratorTimeNanoSecs.load() /
+                (double)_durationStat.GetValueFromIteratorCount.load());
   NKV_LOG_I(std::cout,
             "Index: Query Count: {}, Total Time Cost: {:.2f} s, Average Time "
             "Cost: {:.2f} ns",

@@ -13,17 +13,17 @@
 
 namespace NKV {
 struct TimeStamp {
-  uint64_t txn_nanoseconds = 0;
+  uint64_t txn_ticks = 0;
 
-  void getNow() { txn_nanoseconds = rte_rdtsc(); }
+  void getNow() { txn_ticks = rte_rdtsc(); }
 
-  void moveBackward(uint64_t ticks) { txn_nanoseconds -= ticks; }
-  bool eq(TimeStamp ts) { return this->txn_nanoseconds == ts.txn_nanoseconds; }
-  bool ne(TimeStamp ts) { return this->txn_nanoseconds != ts.txn_nanoseconds; }
-  bool gt(TimeStamp ts) { return this->txn_nanoseconds > ts.txn_nanoseconds; }
-  bool ge(TimeStamp ts) { return this->txn_nanoseconds >= ts.txn_nanoseconds; }
-  bool lt(TimeStamp ts) { return this->txn_nanoseconds < ts.txn_nanoseconds; }
-  bool le(TimeStamp ts) { return this->txn_nanoseconds <= ts.txn_nanoseconds; }
+  void moveBackward(uint64_t ticks) { txn_ticks -= ticks; }
+  bool eq(TimeStamp ts) { return this->txn_ticks == ts.txn_ticks; }
+  bool ne(TimeStamp ts) { return this->txn_ticks != ts.txn_ticks; }
+  bool gt(TimeStamp ts) { return this->txn_ticks > ts.txn_ticks; }
+  bool ge(TimeStamp ts) { return this->txn_ticks >= ts.txn_ticks; }
+  bool lt(TimeStamp ts) { return this->txn_ticks < ts.txn_ticks; }
+  bool le(TimeStamp ts) { return this->txn_ticks <= ts.txn_ticks; }
 };
 
 }  // namespace NKV
@@ -40,6 +40,6 @@ struct fmt::formatter<NKV::TimeStamp> {
   auto format(const NKV::TimeStamp &ts, FormatContext &ctx) const
       -> decltype(ctx.out()) {
     // ctx.out() is an output iterator to write to.
-    return fmt::format_to(ctx.out(), "{}", ts.txn_nanoseconds);
+    return fmt::format_to(ctx.out(), "{}", ts.txn_ticks);
   }
 };

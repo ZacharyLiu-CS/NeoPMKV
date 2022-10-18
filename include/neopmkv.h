@@ -25,7 +25,7 @@ class NeoPMKV {
   NeoPMKV(std::string db_path = "/mnt/pmem0/tmp-neopmkv",
           uint64_t chunk_size = 16ULL << 20, uint64_t db_size = 16ULL << 30,
           bool enable_pbrb = false, bool async_pbrb = false,
-          bool enable_async_gc = false, uint32_t maxPageNum = 1ull << 18) {
+          bool enable_async_gc = false, uint32_t max_page_num = 1ull << 18, uint64_t rw_mirco = 2000, double gc_threshold = 0.7, uint64_t gc_inteval_micro = 2000, double hit_threshold = 0.3) {
     _enable_pbrb = enable_pbrb;
     _async_pbrb = async_pbrb;
 
@@ -41,8 +41,11 @@ class NeoPMKV {
       // get the timestamp now
       TimeStamp ts_start_pbrb;
       ts_start_pbrb.getNow();
-      _pbrb = new PBRB(maxPageNum, &ts_start_pbrb, &_indexerList, &_sUMap, 60,
-                       5, _async_pbrb, enable_async_gc, 0.7, 100000);
+      _pbrb = new PBRB(max_page_num, &ts_start_pbrb, &_indexerList, 
+                      &_sUMap, rw_mirco,
+                      4, async_pbrb, 
+                      enable_async_gc, gc_threshold, 
+                      gc_inteval_micro, hit_threshold);
     }
   }
   ~NeoPMKV() {
@@ -80,9 +83,7 @@ class NeoPMKV {
             std::vector<uint32_t> fields = std::vector<uint32_t>());
 
  private:
-  bool checkSchemaIdValid(SchemaId id) {
-    return _sUMap.find(id) == nullptr ? false : true;
-  }
+
   bool getValueFromIndexIterator(IndexerIterator &idxIter,
                                  std::shared_ptr<IndexerT> indexer,
                                  SchemaId schemaid, Value &value,
@@ -105,6 +106,12 @@ class NeoPMKV {
 #ifdef ENABLE_STATISTICS
   // Statistics:
   struct StatStruct {
+    std::atomic<uint64_t> GetInterfaceCount = {0};
+    std::atomic<uint64_t> GetInterfaceTimeNanoSecs = {0};
+
+    std::atomic<uint64_t> GetValueFromIteratorCount = {0};
+    std::atomic<uint64_t> GetValueFromIteratorTimeNanoSecs = {0};
+
     std::atomic<uint64_t> indexQueryCount = {0};
     std::atomic<uint64_t> indexQueryTimeNanoSecs = {0};
 

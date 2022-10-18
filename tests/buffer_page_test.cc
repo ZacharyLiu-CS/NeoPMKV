@@ -87,11 +87,11 @@ TEST(BufferPageTest, BasicFunctions) {
   pagePtr->setRowBitMapPage(rOff);
   RowAddr rAddr = pagePtr->_getRowAddr(rOff, rowSize);
 
-  TimeStamp ts{.txn_nanoseconds = 12345};
+  TimeStamp ts{.txn_ticks = 12345};
   pagePtr->setTimestampRow(rAddr, ts);
   ASSERT_NE(&(((RowHeader *)rAddr)->timestamp), &ts);
-  ASSERT_EQ(pagePtr->getTimestampRow(rAddr).txn_nanoseconds,
-            ts.txn_nanoseconds);
+  ASSERT_EQ(pagePtr->getTimestampRow(rAddr).txn_ticks,
+            ts.txn_ticks);
 
   pagePtr->setPlogAddrRow(rAddr, (PmemAddress)0x8765);
   ASSERT_EQ(pagePtr->getPlogAddrRow(rAddr), (PmemAddress)0x8765);

@@ -276,14 +276,14 @@ class SchemaUMap {
   }
 
   uint32_t getSchemaID(std::string schemaName) {
-    std::lock_guard<std::mutex> guard(mutex_);
+    // std::lock_guard<std::mutex> guard(mutex_);
     for (auto &item : _umap) {
       if (item.second.name == schemaName) return item.first;
     }
     return 0;
   }
   Schema *find(SchemaId schemaId) {
-    std::lock_guard<std::mutex> guard(mutex_);
+    // std::lock_guard<std::mutex> guard(mutex_);
     auto it = _umap.find(schemaId);
     return it == _umap.end() ? nullptr : &(it->second);
   }

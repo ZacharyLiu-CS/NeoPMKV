@@ -22,6 +22,7 @@ int main(){
 
 
   // NKV::NeoPMKV * neopmkv = new NKV::NeoPMKV();
+  // neopmkv->createSchema(std::vector<SchemaField> fields, uint32_t primarykey_id, std::string name)
   // NKV::Key key1 = 1;
   // std::string value1 = "1dsadadasdad1";
   // NKV::Key key2 = 2;

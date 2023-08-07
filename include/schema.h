@@ -135,10 +135,11 @@ enum class FieldType : uint8_t {
   FLOAT,   // Not supported as key field for now
   DOUBLE,  // Not supported as key field for now
   BOOL,
-  STRING,  // NULL characters in string is OK
+  STRING,  // fixed characters in string is OK
+  VARSTR,  // variable str which can be changed in the subsequent progress
 };
 
-const uint32_t FTSize[256] = {
+const int32_t FTSize[256] = {
     0,                // NULL_T = 0,
     sizeof(int16_t),  // INT16T,
     sizeof(int32_t),  // INT32T,
@@ -146,8 +147,24 @@ const uint32_t FTSize[256] = {
     sizeof(float),    // FLOAT, // Not supported as key field for now
     sizeof(double),   // DOUBLE,  // Not supported as key field for now
     sizeof(bool),     // BOOL,
-    64,
+    -1,               // -1 means need to define by user
+    9,                // allocate 8 bytes default,
+        //      if the size is smaller than 8 bytes: it is stored in the row
+        //      else: store the ptr and point to the heap
 };
+enum class VariableFieldType : uint8_t {
+  NULL_T = 0,
+  FULL_DATA,
+  ONLY_PONTER,
+};
+
+struct VarStrField {
+  union {
+    char content[8];
+    void *contentPtr;
+  };
+  VariableFieldType type;
+} __attribute__((packed));
 
 struct SchemaField {
   FieldType type;
@@ -155,18 +172,9 @@ struct SchemaField {
   uint32_t size = 0;
 
   SchemaField() = delete;
-  SchemaField(FieldType type, std::string name, uint32_t size) {
-    this->type = type;
-    this->name = name;
-    this->size = size;
-    // if (type == FieldType::STRING) {
-    //   uint32_t maxSize = 1 << 20;
-    //   if (size > maxSize)
-    //     this->size = maxSize;
-    //   else
-    //     this->size = 1U << (32 - __builtin_clz(size - 1));
-    // } else
-    //   size = FTSize[(uint8_t)type];
+  SchemaField(FieldType type_, std::string name_, uint32_t size_)
+      : type(type_), name(name_), size(size_) {
+    assert(size != -1);
   }
   SchemaField(FieldType type, std::string name) {
     this->type = type;
@@ -197,6 +205,7 @@ struct Schema {
   uint32_t size = 0;
   // all field attributes
   // meta data of field in storage
+  bool hasVariableField = false;
   std::vector<SchemaField> fields;
   std::vector<FieldMetaData> fieldsMeta;
 
@@ -210,6 +219,9 @@ struct Schema {
     (void)getSize();
     uint32_t currentOffset = 0;
     for (auto i : fields) {
+      if (i.type == FieldType::VARSTR) {
+        hasVariableField = true;
+      }
       fieldsMeta.push_back(FieldMetaData());
       auto &field_meta = fieldsMeta.back();
       field_meta.fieldSize = i.size;

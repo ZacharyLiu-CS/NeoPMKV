@@ -118,12 +118,12 @@ class PmemLog : public PmemEngine {
   //            return S201_Created_File
   inline Status _mapExistingFile(std::string chunk_file, char **pmem_addr) {
     size_t mapped_len;
-    if ((*pmem_addr = static_cast<char *>(pmem_map_file(
-             chunk_file.c_str(), 0, 0, 0666, &mapped_len, &_is_pmem))) ==
-        NULL) {
-      NKV_LOG_E(std::cerr, "pmem map existing file fail!");
-      return PmemStatuses::S500_Internal_Server_Error_Map_Fail;
-    }
+      if ((*pmem_addr = static_cast<char *>(pmem_map_file(
+               chunk_file.c_str(), 0, 0, 0666, &mapped_len, &_is_pmem))) ==
+          NULL) {
+        NKV_LOG_E(std::cerr, "pmem map existing file fail!");
+        return PmemStatuses::S500_Internal_Server_Error_Map_Fail;
+      }
     return PmemStatuses::S200_OK_Map;
   }
 
@@ -145,12 +145,12 @@ class PmemLog : public PmemEngine {
 
     // create the target file
     size_t mapped_len;
-    if ((*pmemAddr = static_cast<char *>(pmem_map_file(
-             file_name.c_str(), file_size, PMEM_FILE_CREATE | PMEM_FILE_EXCL,
-             0666, &mapped_len, &_is_pmem))) == NULL) {
-      NKV_LOG_E(std::cerr, "pmem create existing file!");
-      return PmemStatuses::S409_Conflict_File_Existed;
-    }
+      if ((*pmemAddr = static_cast<char *>(pmem_map_file(
+               file_name.c_str(), file_size, PMEM_FILE_CREATE | PMEM_FILE_EXCL,
+               0666, &mapped_len, &_is_pmem))) == NULL) {
+        NKV_LOG_E(std::cerr, "pmem create existing file!");
+        return PmemStatuses::S409_Conflict_File_Existed;
+      }
     return PmemStatuses::S201_Created_File;
   }
   inline Status _addNewChunk() {
@@ -194,7 +194,7 @@ class PmemLog : public PmemEngine {
   inline void _copyToNonPmem(char *dst, T *src, size_t len) {
     memcpy(dst, src, len);
     // Flush it
-    pmem_msync(dst, len);
+    // pmem_msync(dst, len);
   }
 
   // write data to pmem file by store instruction

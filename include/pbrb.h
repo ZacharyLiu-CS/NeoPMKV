@@ -228,7 +228,7 @@ class PBRB {
  private:
   BufferPage *getPageAddr(void *rowAddr);
 
-  decltype(_freePageList) &getFreePageList() { return _freePageList; }
+  auto &getFreePageList() { return _freePageList; }
 
   uint32_t getMaxPageNumber() { return _maxPageNumber; }
 

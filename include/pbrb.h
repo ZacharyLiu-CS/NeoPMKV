@@ -443,9 +443,11 @@ class PBRB {
   bool dropRow(RowAddr rAddr);
 
   bool evictRow(IndexerIterator &iter);
-  // GTEST
 
   friend class BufferListBySchema;
+
+  // For gtest
+  friend class VariableFieldTest;
   FRIEND_TEST(PBRBTest, Test01);
 };
 

@@ -194,7 +194,7 @@ class PmemLog : public PmemEngine {
   inline void _copyToNonPmem(char *dst, T *src, size_t len) {
     memcpy(dst, src, len);
     // Flush it
-    // pmem_msync(dst, len);
+    pmem_msync(dst, len);
   }
 
   // write data to pmem file by store instruction

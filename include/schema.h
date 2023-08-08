@@ -17,6 +17,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+#include "profiler.h"
 #include "timestamp.h"
 
 namespace NKV {
@@ -147,10 +148,12 @@ const int32_t FTSize[256] = {
     sizeof(float),    // FLOAT, // Not supported as key field for now
     sizeof(double),   // DOUBLE,  // Not supported as key field for now
     sizeof(bool),     // BOOL,
-    -1,               // -1 means need to define by user
-    9,                // allocate 8 bytes default,
-        //      if the size is smaller than 8 bytes: it is stored in the row
-        //      else: store the ptr and point to the heap
+    8,                // default size of string
+    12,               // allocate 8 bytes default,
+                      //      if the size is smaller than 8 bytes:
+                      //            it is stored in the row
+                      //      else:
+                      //            store the ptr and point to the heap
 };
 enum class VariableFieldType : uint8_t {
   NULL_T = 0,
@@ -158,12 +161,38 @@ enum class VariableFieldType : uint8_t {
   ONLY_PONTER,
 };
 
-struct VarStrField {
+struct VarStrFieldContent {
+  uint32_t contentSizeAndType;
   union {
-    char content[8];
+    char contentData[8];
     void *contentPtr;
   };
-  VariableFieldType type;
+  void encode(void *content, uint32_t size) {
+    VariableFieldType type_ = VariableFieldType::NULL_T;
+    if (size <= 8 && size > 0) type_ = VariableFieldType::FULL_DATA;
+    if (size > 8) type_ = VariableFieldType::ONLY_PONTER;
+
+    contentSizeAndType = (size | ((uint8_t)type_ << 16));
+
+    if (type_ == VariableFieldType::FULL_DATA) {
+      std::memcpy(contentData, content, size);
+    } else {
+      contentPtr = content;
+    }
+  }
+  uint32_t getSize() {
+    return (uint16_t)(contentSizeAndType);
+  }
+  VariableFieldType getType() {
+    return (VariableFieldType)(contentSizeAndType >> 16);
+  }
+  auto getContent() {
+    if (getType() == VariableFieldType::FULL_DATA) {
+      return contentData;
+    } else {
+      return (char *)contentPtr;
+    }
+  }
 } __attribute__((packed));
 
 struct SchemaField {
@@ -174,8 +203,12 @@ struct SchemaField {
   SchemaField() = delete;
   SchemaField(FieldType type_, std::string name_, uint32_t size_)
       : type(type_), name(name_), size(size_) {
-    assert(size != -1);
+    assert(size % 4 == 0);
+    if (type_ == FieldType::VARSTR) {
+      size = FTSize[(uint8_t)type_];
+    }
   }
+
   SchemaField(FieldType type, std::string name) {
     this->type = type;
     this->name = name;
@@ -198,10 +231,6 @@ struct Schema {
   // the primary key field id
   uint32_t primaryKeyField = 0;
   // define the schema data size
-  // field format: | field head  |  field content  |
-  //                    ^                 ^
-  //                    |                 |
-  //       size:       4 bytes         field size
   uint32_t size = 0;
   // all field attributes
   // meta data of field in storage
@@ -234,7 +263,7 @@ struct Schema {
   uint32_t getSize() {
     if (size != 0) return size;
     // Initializa the size
-    for (auto i : fields) size += i.size + sizeof(uint32_t);
+    for (auto i : fields) size += i.size + FieldHeadSize;
     return size;
   }
   inline uint32_t getSize(uint32_t fieldId) {
@@ -247,7 +276,7 @@ struct Schema {
   inline uint32_t getPmemOffset(const std::string &fieldName) {
     uint32_t fieldId = 0;
     for (auto i : fields) {
-      if (i.name == fieldName) return fieldId;
+      if (i.name == fieldName) break;
       fieldId += 1;
     }
     return getPmemOffset(fieldId);
@@ -259,7 +288,7 @@ struct Schema {
   inline uint32_t getPBRBOffset(const std::string &fieldName) {
     uint32_t fieldId = 0;
     for (auto i : fields) {
-      if (i.name == fieldName) return fieldId;
+      if (i.name == fieldName) break;
       fieldId += 1;
     }
     return getPBRBOffset(fieldId);

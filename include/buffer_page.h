@@ -43,7 +43,7 @@ struct PageHeader {
   char reserved[22] = {'\0'};         // 42 (22)
 } __attribute__((packed));
 
-struct RowHeader {
+struct RowHeader {                    // size 24
   char CRC[4];
   TimeStamp timestamp;
   PmemAddress pmemAddr;

@@ -36,18 +36,20 @@ int main() {
   auto schemaid = neopmkv->createSchema(fields, 0, "test");
   NKV::Key key1{schemaid, 1};
   std::string value1 = "1dsadadasdad1";
+  NKV_LOG_I(std::cout, "value: {}", value1);
   NKV::Key key2{schemaid, 2};
   std::string value2 = "22-09kjlksjdlajlsd";
+  NKV_LOG_I(std::cout, "value: {}", value2);
   neopmkv->put(key1, value1);
   neopmkv->put(key2, value2);
 
   std::string read_value = "";
   read_value.clear();
   neopmkv->get(key1, read_value);
-  NKV_LOG_I(std::cout, "value:", read_value);
+  NKV_LOG_I(std::cout, "value: {}", read_value);
   read_value.clear();
   neopmkv->get(key2, read_value);
-  NKV_LOG_I(std::cout, "value:", read_value);
+  NKV_LOG_I(std::cout, "value: {}", read_value);
   delete neopmkv;
   res = system(clean_cmd.c_str());
   return 0;

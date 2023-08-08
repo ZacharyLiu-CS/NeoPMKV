@@ -102,6 +102,8 @@ class NeoPMKV {
 
   PmemEngineConfig _engine_config;
   PmemEngine *_engine_ptr = nullptr;
+  
+  friend class VariableFieldTest;
 
 #ifdef ENABLE_STATISTICS
   // Statistics:

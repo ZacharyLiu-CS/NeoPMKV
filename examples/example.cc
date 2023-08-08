@@ -11,33 +11,44 @@
 #include <string>
 #include <utility>
 
+#include "logging.h"
 #include "neopmkv.h"
 
-#define LOG(msg)                   \
-  do {                             \
-    std::cout << msg << std::endl; \
-  } while (0)
+const std::string db_path = "/mnt/pmem0/tmp-neopmkv-test";
+std::string clean_cmd = std::string("rm -rf ") + std::string(db_path);
+std::string mkdir_cmd = std::string("mkdir -p ") + std::string(db_path);
 
-int main(){
+int main() {
+  int res = system(clean_cmd.c_str());
+  res = system(mkdir_cmd.c_str());
+  const uint64_t chunk_size = 128ull << 20;
+  const uint64_t db_size = 1ull << 30;
+  bool enablePBRB = false;
+  bool asyncPBRB = false;
+  NKV::NeoPMKV *neopmkv = nullptr;
+  if (neopmkv == nullptr) {
+    neopmkv =
+        new NKV::NeoPMKV(db_path, chunk_size, db_size, enablePBRB, asyncPBRB);
+  }
+  std::vector<NKV::SchemaField> fields{
+      NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
+      NKV::SchemaField(NKV::FieldType::STRING, "f2", 16)};
+  auto schemaid = neopmkv->createSchema(fields, 0, "test");
+  NKV::Key key1{schemaid, 1};
+  std::string value1 = "1dsadadasdad1";
+  NKV::Key key2{schemaid, 2};
+  std::string value2 = "22-09kjlksjdlajlsd";
+  neopmkv->put(key1, value1);
+  neopmkv->put(key2, value2);
 
-
-  // NKV::NeoPMKV * neopmkv = new NKV::NeoPMKV();
-  // neopmkv->createSchema(std::vector<SchemaField> fields, uint32_t primarykey_id, std::string name)
-  // NKV::Key key1 = 1;
-  // std::string value1 = "1dsadadasdad1";
-  // NKV::Key key2 = 2;
-  // std::string value2 = "22-09kjlksjdlajlsd";
-  // neopmkv->put(key1, value1);
-  // neopmkv->put(key2, value2);
-
-  // std::string read_value = "";
-  // read_value.clear();
-  // neopmkv->get(key1, read_value);
-  // LOG("value:" << read_value);
-  // read_value.clear();
-  // neopmkv->get(key2, read_value);
-  // LOG("value:" << read_value);
-  
-  // delete neopmkv;
+  std::string read_value = "";
+  read_value.clear();
+  neopmkv->get(key1, read_value);
+  NKV_LOG_I(std::cout, "value:", read_value);
+  read_value.clear();
+  neopmkv->get(key2, read_value);
+  NKV_LOG_I(std::cout, "value:", read_value);
+  delete neopmkv;
+  res = system(clean_cmd.c_str());
   return 0;
 }

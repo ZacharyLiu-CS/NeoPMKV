@@ -184,7 +184,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     NKV_LOG_D(std::cout,
               "Allocated page for schema: {}, page count: {}, time al1: {}, "
               "al2: {}, al3: {}, total: {}",
-              blbs->ownSchema->name, (blbs->curPageNum)->load, al1ns, al2ns,
+              blbs->ownSchema->name, (blbs->curPageNum).load(), al1ns, al2ns,
               al3ns, al1ns + al2ns + al3ns);
 
     return newPage;
@@ -462,10 +462,10 @@ bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
   if (_async_pbrb == true) {
     return asyncWrite(oldTS, newTS, schemaId, value, iter);
   }
-  return syncWrite(oldTS, newTS, schemaId, value, iter);
+  return writeImpl(oldTS, newTS, schemaId, value, iter);
 }
 
-bool PBRB::syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
+bool PBRB::writeImpl(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaid,
                      const Value &value, IndexerIterator iter) {
   auto valuePtr = &iter->second;
 
@@ -538,7 +538,7 @@ void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
 #endif
         auto bufferEntry = asyncBuffer->DequeueOneEntry();
         if (bufferEntry != nullptr) {
-          syncWrite(bufferEntry->_oldTS, bufferEntry->_newTS,
+          writeImpl(bufferEntry->_oldTS, bufferEntry->_newTS,
                     asyncBuffer->getSchemaId(), bufferEntry->_entry_content,
                     bufferEntry->_iter);
           bufferEntry->consumeContent();

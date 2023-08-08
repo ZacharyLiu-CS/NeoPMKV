@@ -416,7 +416,7 @@ class PBRB {
 
   void _stopGC();
   bool _asyncTraverseIdxGC();
-  bool syncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+  bool writeImpl(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                  const Value &value, IndexerIterator iter);
   bool asyncWrite(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
                   const Value &value, IndexerIterator iter);

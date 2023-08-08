@@ -24,6 +24,7 @@ TEST(PBRBTest, Test01) {
   auto indexer = indexerList[1];
   uint32_t maxPageNum = 100;
   PBRB pbrb(maxPageNum, &timestamp, &indexerList, &sUMap, 60, 5, false);
+  pbrb.createCacheForSchema(schema1.schemaId, schema1.version);
 
   struct schema1Value {
     uint16_t field1;
@@ -37,7 +38,7 @@ TEST(PBRBTest, Test01) {
   ASSERT_EQ(k1.primaryKey, pk1_expected);
 
   ValuePtr vp1 = ValuePtr();
-  vp1.setColdPmemAddr((PmemAddress)0x12345678);
+  vp1.setColdPmemAddr((PmemAddress)&indexerList);
   indexer->insert({k1.primaryKey, vp1});
 
   std::string info[2] = {"Read k1, Cache k1(Cold)", "Read k1 (hot)"};
@@ -194,7 +195,7 @@ TEST(PBRBTest, Test02) {
   ts_start_pbrb.getNow();
   PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false,
             true, 0.7, 50000);
-
+  pbrb.createCacheForSchema(schema02.schemaId, schema02.version);
   auto &indexer = indexerList[1];
   // Cache all KVs
   for (int i = 0; i < 3; i++) {
@@ -256,6 +257,7 @@ TEST(PBRBTest, Test03) {
   TimeStamp ts_start_pbrb;
   ts_start_pbrb.getNow();
   PBRB pbrb(maxPageNum, &ts_start_pbrb, &indexerList, &sUMap, 60, 5, false);
+  pbrb.createCacheForSchema(schema03.schemaId, schema03.version);
 
   auto &indexer = indexerList[1];
   std::vector<uint64_t> seq[] = {

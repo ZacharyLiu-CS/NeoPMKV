@@ -63,6 +63,7 @@ target_link_libraries(example
   pmem
   fmt::fmt
   TBB::tbb
+  tbbmalloc
   )
 
 #8. define the static library
@@ -72,6 +73,7 @@ target_link_libraries( ${PROJECT_NAME}
   pmem
   fmt::fmt
   TBB::tbb
+  tbbmalloc
   )
 #9. define the install path
 set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/neopmkv)
@@ -107,6 +109,7 @@ if (GTEST_FOUND)
       gtest
       fmt::fmt
       TBB::tbb
+      tbbmalloc
       )
     add_test(NAME ${testname} COMMAND ${testname})
   ENDFOREACH(testsourcefile ${TEST_FILE})

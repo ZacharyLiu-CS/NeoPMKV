@@ -308,23 +308,23 @@ class SchemaAllocator {
 class SchemaUMap {
  private:
   std::unordered_map<SchemaId, Schema> _umap;
-  std::mutex mutex_;
+  std::mutex _mutex;
 
  public:
   void addSchema(Schema schema) {
-    std::lock_guard<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(_mutex);
     _umap.insert({schema.schemaId, schema});
   }
 
   uint32_t getSchemaID(std::string schemaName) {
-    // std::lock_guard<std::mutex> guard(mutex_);
+    // std::lock_guard<std::mutex> guard(_mutex);
     for (auto &item : _umap) {
       if (item.second.name == schemaName) return item.first;
     }
     return 0;
   }
   Schema *find(SchemaId schemaId) {
-    // std::lock_guard<std::mutex> guard(mutex_);
+    // std::lock_guard<std::mutex> guard(_mutex);
     auto it = _umap.find(schemaId);
     return it == _umap.end() ? nullptr : &(it->second);
   }
@@ -333,7 +333,7 @@ class SchemaUMap {
   decltype(_umap.end()) end() { return _umap.end(); }
 };
 
-}  // namespace NKV
+}  // end of namespace NKV
 
 template <>
 struct fmt::formatter<NKV::Key> {

@@ -148,52 +148,58 @@ const int32_t FTSize[256] = {
     sizeof(float),    // FLOAT, // Not supported as key field for now
     sizeof(double),   // DOUBLE,  // Not supported as key field for now
     sizeof(bool),     // BOOL,
-    8,                // default size of string
+    16,               // default size of string
     12,               // allocate 8 bytes default,
                       //      if the size is smaller than 8 bytes:
                       //            it is stored in the row
                       //      else:
                       //            store the ptr and point to the heap
 };
-enum class VariableFieldType : uint8_t {
+enum class VarFieldType : uint16_t {
   NULL_T = 0,
   FULL_DATA,
   ONLY_PONTER,
 };
 
-struct VarStrFieldContent {
-  uint32_t contentSizeAndType;
+struct VarFieldContent {
+  uint16_t contentSize;
+  VarFieldType contentType;
   union {
     char contentData[8];
     void *contentPtr;
   };
-  void encode(void *content, uint32_t size) {
-    VariableFieldType type_ = VariableFieldType::NULL_T;
-    if (size <= 8 && size > 0) type_ = VariableFieldType::FULL_DATA;
-    if (size > 8) type_ = VariableFieldType::ONLY_PONTER;
-
-    contentSizeAndType = (size | ((uint8_t)type_ << 16));
-
-    if (type_ == VariableFieldType::FULL_DATA) {
-      std::memcpy(contentData, content, size);
-    } else {
-      contentPtr = content;
-    }
-  }
-  uint32_t getSize() {
-    return (uint16_t)(contentSizeAndType);
-  }
-  VariableFieldType getType() {
-    return (VariableFieldType)(contentSizeAndType >> 16);
-  }
-  auto getContent() {
-    if (getType() == VariableFieldType::FULL_DATA) {
-      return contentData;
-    } else {
-      return (char *)contentPtr;
-    }
-  }
 } __attribute__((packed));
+
+inline void EncodeToVarFieldConent(void *dst, void *content, uint32_t size) {
+  VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
+  VarFieldType type_ = VarFieldType::NULL_T;
+  if (size <= 8 && size > 0) type_ = VarFieldType::FULL_DATA;
+  if (size > 8) type_ = VarFieldType::ONLY_PONTER;
+
+  dstPtr->contentType = type_ ;
+  dstPtr->contentSize = size;
+
+  if (type_ == VarFieldType::FULL_DATA) {
+    std::memcpy(dstPtr->contentData, content, size);
+  } else {
+    dstPtr->contentPtr = content;
+  }
+}
+inline uint32_t GetVarFieldSize(void *dst) {
+  return 
+      reinterpret_cast<VarFieldContent *>(dst)->contentSize;
+}
+inline VarFieldType GetVarFieldType(void *dst) {
+  return 
+      reinterpret_cast<VarFieldContent *>(dst)->contentType;
+}
+inline auto GetVarFieldContent(void *dst) {
+  if (GetVarFieldType(dst) == VarFieldType::FULL_DATA) {
+    return reinterpret_cast<VarFieldContent*>(dst)->contentData;
+  } else {
+    return (char*)reinterpret_cast<VarFieldContent*>(dst)->contentPtr;
+  }
+}
 
 struct SchemaField {
   FieldType type;
@@ -203,7 +209,7 @@ struct SchemaField {
   SchemaField() = delete;
   SchemaField(FieldType type_, std::string name_, uint32_t size_)
       : type(type_), name(name_), size(size_) {
-    assert(size % 4 == 0);
+    // assert(size % 4 == 0);
     if (type_ == FieldType::VARSTR) {
       size = FTSize[(uint8_t)type_];
     }
@@ -248,9 +254,6 @@ struct Schema {
     (void)getSize();
     uint32_t currentOffset = 0;
     for (auto i : fields) {
-      if (i.type == FieldType::VARSTR) {
-        hasVariableField = true;
-      }
       fieldsMeta.push_back(FieldMetaData());
       auto &field_meta = fieldsMeta.back();
       field_meta.fieldSize = i.size;
@@ -258,12 +261,21 @@ struct Schema {
       field_meta.isNullable = false;
       field_meta.isVariable = false;
       currentOffset += i.size + FieldHeadSize;
+      if (i.type == FieldType::VARSTR) {
+        hasVariableField = true;
+        field_meta.isVariable = true;
+      }
     }
+  }
+  uint32_t getAllFixedFieldSize() {
+    int all_field_size = 0;
+    for (auto &i : fields) all_field_size += i.size;
+    return all_field_size;
   }
   uint32_t getSize() {
     if (size != 0) return size;
     // Initializa the size
-    for (auto i : fields) size += i.size + FieldHeadSize;
+    for (auto &i : fields) size += i.size + FieldHeadSize;
     return size;
   }
   inline uint32_t getSize(uint32_t fieldId) {

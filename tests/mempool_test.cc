@@ -1,5 +1,5 @@
 //
-//  mempool_test.cc
+//  MemPool_test.cc
 //
 //  Created by zhenliu on 09/08/2023.
 //  Copyright (c) 2023 zhenliu <liuzhenm@mail.ustc.edu.cn>.
@@ -18,7 +18,7 @@
 #include "logging.h"
 
 namespace NKV {
-class MempoolTest : public testing::Test {
+class MemPoolTest : public testing::Test {
  public:
   void SetUp() override {
     _memory_pool_buffer = (char *)malloc(_pool_size);
@@ -67,7 +67,7 @@ class MempoolTest : public testing::Test {
   tbb::fixed_pool *_my_pool = nullptr;
 };
 
-TEST_F(MempoolTest, TestAllocate) {
+TEST_F(MemPoolTest, TestAllocate) {
   RecyclePool();
   EXPECT_TRUE(AllocatePage(_page_size, 1));
   EXPECT_TRUE(AllocatePage(_page_size, _page_count / 2));
@@ -75,7 +75,7 @@ TEST_F(MempoolTest, TestAllocate) {
   EXPECT_FALSE(AllocatePage(_page_size, 1));
 }
 
-TEST_F(MempoolTest, TestFree) {
+TEST_F(MemPoolTest, TestFree) {
   RecyclePool();
   AllocatePage(_page_size, _page_count);
   FreeSpaceToPool(1);

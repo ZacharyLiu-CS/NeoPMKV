@@ -6,7 +6,9 @@
 //
 
 #pragma once
+#include <bits/stdint-uintn.h>
 #include <fmt/format.h>
+#include <sys/types.h>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -18,57 +20,47 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
-#include "pmem_engine.h"
-#include "profiler.h"
 
 namespace NKV {
 
 class Schema;
+class MemPool;
 
-class DataMovementPlan {
-  struct MovementTask {
-    char *des = nullptr;
-    char *src = nullptr;
-    uint32_t size = 0;
-    MovementTask(char *des_, char *src_, uint32_t size_)
-        : des(des_), src(src_), size(size_) {}
-    void apply() { memcpy(des, src, size); }
-  };
-
- public:
-  void BuildMovementTask(Schema *schema_ptr) {
-
-  }
-  void Apply(){
-    for(auto &i : _mov_plan){
-      i.apply();
-    }
-  }
-
- private:
-  std::vector<MovementTask> _mov_plan;
+enum MovementTpye : uint8_t {
+  NO_CHANGE = 0,
+  FROM_USER_TO_SEQ,
+  FROM_SEQ_TO_CACHE,
+  FROM_CACHE_TO_SEQ,
 };
 
-class VolatileParser {
+class DataMovementTask {
  public:
-  VolatileParser(Schema *schema_ptr) : _schema_ptr(schema_ptr) {}
+  DataMovementTask(MemPool *globalPool) : _globalPool(globalPool) {}
+
+  void BuildUserToSeqTask(Schema *schemaPtr, std::vector<std::string> &src,
+                          std::string &dest, uint32_t seqSize,
+                          uint32_t fixedSize);
 
  private:
-  Schema *_schema_ptr = nullptr;
+  MemPool *_globalPool;
 };
 
-class NonvolatileParser {
- public:
-  NonvolatileParser() {}
+using Value = std::string;
 
-  std::string encode(const std::vector<Value> &values) {
-    std::stringstream data_buf;
-    data_buf.clear();
-    for (const auto &value : values) {
-      data_buf << value.size() << value;
-    }
-    return data_buf.str();
-  }
+class Parser {
+ public:
+  Parser(MemPool *globalPool) : _globalPool(globalPool) {}
+
+  std::string ParseFromUserWriteToSeq(Schema *schemaPtr,
+                                       std::vector<Value> &fieldValues);
+
+  char* ParseFromSeqToTwoPart(Schema *schemaPtr, std::string seqValue);
+
+  std::string ParseFromTwoPartToSeq(Schema *schemaPtr, char* rowFiexdPart, char* rowVarPart);
+
+
+ private:
+  MemPool *_globalPool = nullptr;
 };
 
 }  // end of namespace NKV

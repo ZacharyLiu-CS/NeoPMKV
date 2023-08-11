@@ -12,10 +12,14 @@
 #include <string>
 #include "gtest/gtest.h"
 #include "logging.h"
+#include "mempool.h"
 #include "neopmkv.h"
 #include "schema.h"
+#include "schema_parser.h"
 
 namespace NKV {
+
+// outer test
 class VariableFieldTest : public testing::Test {
  public:
   void SetUp() override {
@@ -31,9 +35,7 @@ class VariableFieldTest : public testing::Test {
     int res = system(clean_cmd_.c_str());
   }
 
-  NKV::VarStrFieldContent GetVariableField() {
-    return NKV::VarStrFieldContent();
-  }
+  NKV::VarFieldContent GetVariableField() { return NKV::VarFieldContent(); }
 
  public:
   NKV::NeoPMKV *neopmkv_ = nullptr;
@@ -48,7 +50,7 @@ class VariableFieldTest : public testing::Test {
 };
 
 TEST_F(VariableFieldTest, TestSize) {
-  EXPECT_EQ(sizeof(VarStrFieldContent), FTSize[(uint8_t)FieldType::VARSTR]);
+  EXPECT_EQ(sizeof(VarFieldContent), FTSize[(uint8_t)FieldType::VARSTR]);
 }
 
 TEST_F(VariableFieldTest, TestCreation) {
@@ -70,19 +72,77 @@ TEST_F(VariableFieldTest, TestCreation) {
 TEST_F(VariableFieldTest, TestVarStrConent) {
   auto varField0 = GetVariableField();
   char smallField[8] = "1234567";
-  varField0.encode(smallField, sizeof(smallField));
-  EXPECT_EQ(varField0.getSize(), 8);
-  EXPECT_EQ(varField0.getType(), VariableFieldType::FULL_DATA);
-  EXPECT_NE(varField0.getContent(),smallField);
-  EXPECT_EQ(std::string(varField0.getContent()),std::string(smallField));
+  EncodeToVarFieldConent(&varField0, smallField, sizeof(smallField));
+  EXPECT_EQ(GetVarFieldSize(&varField0), 8);
+  EXPECT_EQ(GetVarFieldType(&varField0), VarFieldType::FULL_DATA);
+  EXPECT_NE(GetVarFieldContent(&varField0), smallField);
+  EXPECT_EQ(std::string(GetVarFieldContent(&varField0)),
+            std::string(smallField));
 
   char largeField[16] = "123456787654321";
-  varField0.encode(largeField, sizeof(largeField));
-  EXPECT_EQ(varField0.getSize(), 16);
-  EXPECT_EQ(varField0.getType(), VariableFieldType::ONLY_PONTER);
-  EXPECT_EQ(varField0.getContent(), largeField);
+  EncodeToVarFieldConent(&varField0, largeField, sizeof(largeField));
+  EXPECT_EQ(GetVarFieldSize(&varField0), 16);
+  EXPECT_EQ(GetVarFieldType(&varField0), VarFieldType::ONLY_PONTER);
+  EXPECT_EQ(GetVarFieldContent(&varField0), largeField);
+}
+
+// internal test
+class ParserTest : public testing::Test {
+ public:
+  void SetUp() override {
+    _memPoolPtr = new MemPool(4096, 64);
+    _parser = new Parser(_memPoolPtr);
+  }
+  Schema BuildSchema(std::string name, std::vector<NKV::SchemaField> &fields) {
+    return _schemaAllocator.createSchema(name, 0, fields);
+  }
+  std::string FromUserToSeqRow(Schema *schemaPtr, std::vector<Value> &values) {
+    return _parser->ParseFromUserWriteToSeq(schemaPtr, values);
+  }
+  void TearDown() override {
+    delete _memPoolPtr;
+    delete _parser;
+  }
+
+ private:
+  SchemaAllocator _schemaAllocator;
+  MemPool *_memPoolPtr = nullptr;
+  Parser *_parser = nullptr;
+};
+
+TEST_F(ParserTest, TestSeqRowFormat) {
+  std::vector<NKV::SchemaField> fields1{
+      NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
+      NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
+      NKV::SchemaField(NKV::FieldType::VARSTR, "f2")};
+  Schema test1 = BuildSchema("test1", fields1);
+  std::vector<Value> values1 = {"gg1", "gg2", "var2"};
+  // row format :  | row size | field 0 | field 1 | field 2|
+  std::string res = FromUserToSeqRow(&test1, values1);
+  // for (auto& el : res)
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
+  // std::cout << '\n';
+
+  EXPECT_EQ(*(uint32_t *)res.data(), 28);
+  EXPECT_EQ(((VarFieldContent *)(res.data() + 20))->contentSize , 4);
+  EXPECT_EQ(((VarFieldContent *)(res.data() + 20))->contentType , VarFieldType::FULL_DATA);
+
+  std::vector<NKV::SchemaField> fields2{
+      NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
+      NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
+      NKV::SchemaField(NKV::FieldType::VARSTR, "f2")};
+  Schema test2 = BuildSchema("test2", fields2);
+  std::vector<Value> values2 = {"gg1", "gg2", "var234567890123455678"};
+  std::string res2 = FromUserToSeqRow(&test2, values2);
+ 
+  // row format :  | row size | field 0 | field 1 | field 2 head| field 2 content |
+  EXPECT_EQ(*(uint32_t *)res2.data(), 49);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentSize , 21);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentType , VarFieldType::ONLY_PONTER);
+  EXPECT_STREQ((char *)((VarFieldContent *)(res2.data() + 20))->contentPtr ,values2[2].data());
 
 }
+
 }  // namespace NKV
 
 int main(int argc, char **argv) {

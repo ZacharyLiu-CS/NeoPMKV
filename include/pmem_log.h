@@ -53,6 +53,8 @@ class PmemLog : public PmemEngine {
 
   Status read(PmemAddress readAddr, std::string &value) override;
 
+  Status read(PmemAddress readAddr, std::string& value, uint32_t size) override;
+
   Status seal() override;
 
   uint64_t getFreeSpace() override;

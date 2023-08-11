@@ -117,23 +117,30 @@ Status PmemLog::read(PmemAddress readAddr, std::string &value) {
   }
   uint32_t read_size = 0;
   _read((char *)&read_size, readAddr, sizeof(uint32_t));
+  return read(readAddr + sizeof(uint32_t), value, read_size);
+}
+
+Status PmemLog::read(PmemAddress readAddr, std::string &value, uint32_t size) {
+  // checkout the effectiveness of start_offset
+  if (readAddr > _tail_offset.load()) {
+    return PmemStatuses::S403_Forbidden_Invalid_Offset;
+  }
 
   // checkout the effectiveness of read size
   uint64_t chunk_remaing_space =
       _plog_meta.chunk_size - readAddr % _plog_meta.chunk_size;
-  if (chunk_remaing_space < read_size) {
+  if (chunk_remaing_space < size) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
-  if (readAddr + read_size > _tail_offset.load()) {
+  if (readAddr + size > _tail_offset.load()) {
     return PmemStatuses::S403_Forbidden_Invalid_Size;
   }
   // pass the check
-  value.resize(read_size);
-  _read((char *)value.data(), readAddr + sizeof(uint32_t), read_size);
+  value.resize(size);
+  _read((char *)value.data(), readAddr, size);
 
   return PmemStatuses::S200_OK_Found;
 }
-
 Status PmemLog::seal() {
   if (_plog_meta.is_sealed == false) {
     return PmemStatuses::S200_OK_Sealed;

@@ -24,15 +24,25 @@
   } while (0)
 #endif
 
-#define NKV_LOG_I(output, fmt_str, ...)                                       \
-  do {                                                                        \
-    fmt::print(output, FMT_STRING("[{}:{} @{} INFO] Thread:[{}] " fmt_str "\n"), \
-               __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(),  \
-               ##__VA_ARGS__);                                                \
+// #define NKV_LOG_I(output, fmt_str, ...)                                       \
+//   do {                                                                        \
+//     fmt::print(output, FMT_STRING("[{}:{} @{} INFO] Thread:[{}] " fmt_str "\n"), \
+//                __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(),  \
+//                ##__VA_ARGS__);                                                \
+//   } while (0)
+// #define NKV_LOG_E(output, fmt_str, ...)                                        \
+//   do {                                                                         \
+//     fmt::print(output, FMT_STRING("[{}:{} @{} ERROR] Thread:[{}] " fmt_str "\n"), \
+//                __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(),   \
+//                ##__VA_ARGS__);                                                 \
+//   } while (0)
+
+
+#define NKV_LOG_I(fmt_str, ...) \
+  do {                          \
   } while (0)
-#define NKV_LOG_E(output, fmt_str, ...)                                        \
-  do {                                                                         \
-    fmt::print(output, FMT_STRING("[{}:{} @{} ERROR] Thread:[{}] " fmt_str "\n"), \
-               __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(),   \
-               ##__VA_ARGS__);                                                 \
+
+
+#define NKV_LOG_E(fmt_str, ...) \
+  do {                          \
   } while (0)

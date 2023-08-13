@@ -72,7 +72,7 @@ TEST_F(VariableFieldTest, TestCreation) {
 TEST_F(VariableFieldTest, TestVarStrConent) {
   auto varField0 = GetVariableField();
   char smallField[8] = "1234567";
-  EncodeToVarFieldConent(&varField0, smallField, sizeof(smallField));
+  EncodeToVarFieldFullData(&varField0, smallField, sizeof(smallField));
   EXPECT_EQ(GetVarFieldSize(&varField0), 8);
   EXPECT_EQ(GetVarFieldType(&varField0), VarFieldType::FULL_DATA);
   EXPECT_NE(GetVarFieldContent(&varField0), smallField);
@@ -80,7 +80,7 @@ TEST_F(VariableFieldTest, TestVarStrConent) {
             std::string(smallField));
 
   char largeField[16] = "123456787654321";
-  EncodeToVarFieldConent(&varField0, largeField, sizeof(largeField));
+  EncodeToVarFieldOnlyPointer(&varField0, largeField, sizeof(largeField));
   EXPECT_EQ(GetVarFieldSize(&varField0), 16);
   EXPECT_EQ(GetVarFieldType(&varField0), VarFieldType::ONLY_PONTER);
   EXPECT_EQ(GetVarFieldContent(&varField0), largeField);
@@ -98,6 +98,12 @@ class ParserTest : public testing::Test {
   }
   std::string FromUserToSeqRow(Schema *schemaPtr, std::vector<Value> &values) {
     return _parser->ParseFromUserWriteToSeq(schemaPtr, values);
+  }
+  char * FromSeqToTwoPart(Schema *schemaPtr, std::string& seqValue){
+    return _parser->ParseFromSeqToTwoPart(schemaPtr, seqValue);
+  }
+  std::string FromTwoPartToSeq(Schema *schemaPtr, char* rowFiexdPart, char *rowVarPart){
+    return _parser->ParseFromTwoPartToSeq(schemaPtr, rowFiexdPart, rowVarPart);
   }
   void TearDown() override {
     delete _memPoolPtr;
@@ -136,11 +142,30 @@ TEST_F(ParserTest, TestSeqRowFormat) {
   std::string res2 = FromUserToSeqRow(&test2, values2);
  
   // row format :  | row size | field 0 | field 1 | field 2 head| field 2 content |
+  //               0          4         12        20            32   
   EXPECT_EQ(*(uint32_t *)res2.data(), 49);
   EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentSize , 21);
-  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentType , VarFieldType::ONLY_PONTER);
-  EXPECT_STREQ((char *)((VarFieldContent *)(res2.data() + 20))->contentPtr ,values2[2].data());
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentType , VarFieldType::ROW_OFFSET);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentOffset , 12);
+  
+  //   for (auto& el : res2)
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
+  // std::cout << '\n';
+  char * varPart = FromSeqToTwoPart(&test2, res2);
+  //  for (auto& el : res2)
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
+  // std::cout << '\n';
+  // printf("variable part: %s\n", varPart);
 
+  EXPECT_EQ(*(uint32_t *)res2.data(), 49);
+  EXPECT_EQ(res2.size(), 32);
+  EXPECT_NE(varPart, nullptr);
+
+  std::string res3 = FromTwoPartToSeq(&test2, res2.data(), varPart);
+  EXPECT_EQ(res2.substr(0,24), res3.substr(0,24));
+  //  for (auto& el : res3)
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
+  // std::cout << '\n';
 }
 
 }  // namespace NKV

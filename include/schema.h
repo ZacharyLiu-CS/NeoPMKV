@@ -27,8 +27,9 @@ using SchemaVer = uint16_t;
 
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
-const uint32_t PmemEntryHead = sizeof(uint32_t);
-const uint32_t FieldHeadSize = sizeof(uint32_t);
+const uint32_t PmemEntryHead = 0;
+const uint32_t FieldHeadSize = 0;
+const uint32_t AllFieldConentSize = sizeof(uint32_t);
 using RowAddr = void *;
 const uint32_t ERRMASK = 1 << 31;
 
@@ -155,10 +156,13 @@ const int32_t FTSize[256] = {
                       //      else:
                       //            store the ptr and point to the heap
 };
+
 enum class VarFieldType : uint16_t {
   NULL_T = 0,
+  NOT_CACHE,
   FULL_DATA,
   ONLY_PONTER,
+  ROW_OFFSET,
 };
 
 struct VarFieldContent {
@@ -167,37 +171,61 @@ struct VarFieldContent {
   union {
     char contentData[8];
     void *contentPtr;
+    uint64_t contentOffset;
   };
 } __attribute__((packed));
 
-inline void EncodeToVarFieldConent(void *dst, void *content, uint32_t size) {
+// encode the variable field in cache (two part row) with  full data or pointer
+inline void EncodeToVarFieldFullData(void *dst, void *content, uint32_t size) {
   VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
+  assert(size <= 8);
   VarFieldType type_ = VarFieldType::NULL_T;
-  if (size <= 8 && size > 0) type_ = VarFieldType::FULL_DATA;
-  if (size > 8) type_ = VarFieldType::ONLY_PONTER;
+  if (size != 0) type_ = VarFieldType::FULL_DATA;
 
-  dstPtr->contentType = type_ ;
+  dstPtr->contentType = type_;
   dstPtr->contentSize = size;
+  std::memcpy(dstPtr->contentData, content, size);
 
-  if (type_ == VarFieldType::FULL_DATA) {
-    std::memcpy(dstPtr->contentData, content, size);
-  } else {
-    dstPtr->contentPtr = content;
-  }
 }
+
+inline void EncodeToVarFieldNotCache(void *dst) {
+  VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
+  
+  dstPtr->contentType = VarFieldType::NOT_CACHE;
+  dstPtr->contentOffset = 0;
+}
+inline void EncodeToVarFieldOnlyPointer(void *dst, void *content,
+                                   uint32_t size) {
+  VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
+  VarFieldType type_ = VarFieldType::ONLY_PONTER;
+  assert(size > 8);
+  dstPtr->contentType = type_;
+  dstPtr->contentSize = size;
+  dstPtr->contentPtr = content;
+}
+// encode the variable field in seq row
+inline void EncodeToVarFieldOffset(void *dst, uint64_t contentOffset,
+                                   uint32_t size) {
+  VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
+  VarFieldType type_ = VarFieldType::ROW_OFFSET;
+  assert(size > 8);
+  dstPtr->contentType = type_;
+  dstPtr->contentSize = size;
+  dstPtr->contentOffset = contentOffset;
+}
+
+
 inline uint32_t GetVarFieldSize(void *dst) {
-  return 
-      reinterpret_cast<VarFieldContent *>(dst)->contentSize;
+  return reinterpret_cast<VarFieldContent *>(dst)->contentSize;
 }
 inline VarFieldType GetVarFieldType(void *dst) {
-  return 
-      reinterpret_cast<VarFieldContent *>(dst)->contentType;
+  return reinterpret_cast<VarFieldContent *>(dst)->contentType;
 }
 inline auto GetVarFieldContent(void *dst) {
   if (GetVarFieldType(dst) == VarFieldType::FULL_DATA) {
-    return reinterpret_cast<VarFieldContent*>(dst)->contentData;
+    return reinterpret_cast<VarFieldContent *>(dst)->contentData;
   } else {
-    return (char*)reinterpret_cast<VarFieldContent*>(dst)->contentPtr;
+    return (char *)reinterpret_cast<VarFieldContent *>(dst)->contentPtr;
   }
 }
 
@@ -252,7 +280,7 @@ struct Schema {
         primaryKeyField(primaryKeyField),
         fields(fields) {
     (void)getSize();
-    uint32_t currentOffset = 0;
+    uint32_t currentOffset = AllFieldConentSize;
     for (auto i : fields) {
       fieldsMeta.push_back(FieldMetaData());
       auto &field_meta = fieldsMeta.back();
@@ -274,6 +302,7 @@ struct Schema {
   }
   uint32_t getSize() {
     if (size != 0) return size;
+    size += AllFieldConentSize ;
     // Initializa the size
     for (auto &i : fields) size += i.size + FieldHeadSize;
     return size;
@@ -283,7 +312,7 @@ struct Schema {
   }
 
   inline uint32_t getPmemOffset(uint32_t fieldId) {
-    return fieldsMeta[fieldId].fieldOffset + PmemEntryHead;
+    return fieldsMeta[fieldId].fieldOffset;
   }
   inline uint32_t getPmemOffset(const std::string &fieldName) {
     uint32_t fieldId = 0;

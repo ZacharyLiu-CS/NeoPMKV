@@ -33,17 +33,6 @@ enum MovementTpye : uint8_t {
   FROM_CACHE_TO_SEQ,
 };
 
-class DataMovementTask {
- public:
-  DataMovementTask(MemPool *globalPool) : _globalPool(globalPool) {}
-
-  void BuildUserToSeqTask(Schema *schemaPtr, std::vector<std::string> &src,
-                          std::string &dest, uint32_t seqSize,
-                          uint32_t fixedSize);
-
- private:
-  MemPool *_globalPool;
-};
 
 using Value = std::string;
 
@@ -54,7 +43,7 @@ class Parser {
   std::string ParseFromUserWriteToSeq(Schema *schemaPtr,
                                        std::vector<Value> &fieldValues);
 
-  char* ParseFromSeqToTwoPart(Schema *schemaPtr, std::string seqValue);
+  char* ParseFromSeqToTwoPart(Schema *schemaPtr, std::string& seqValue, bool loadVarPartToCache = true);
 
   std::string ParseFromTwoPartToSeq(Schema *schemaPtr, char* rowFiexdPart, char* rowVarPart);
 

@@ -18,8 +18,8 @@ namespace NKV {
 TEST(PBRBTest, Test01) {
   SchemaAllocator schemaAllocator;
   SchemaUMap sUMap;
-  std::vector<SchemaField> fields = {SchemaField(FieldType::INT16T, "field1"),
-                                     SchemaField(FieldType::INT16T, "field2")};
+  std::vector<SchemaField> fields = {SchemaField(FieldType::STRING, "field1", 6),
+                                     SchemaField(FieldType::STRING, "field2", 6)};
   Schema schema1 = schemaAllocator.createSchema("schema1", 0, fields);
   sUMap.addSchema(schema1);
 
@@ -73,10 +73,10 @@ TEST(PBRBTest, Test01) {
                   "field2: {}]",
                   k1.schemaId, k1.primaryKey, (uint16_t)rv1.field1,
                   (uint16_t)rv1.field2);
-        ASSERT_EQ(read_result, Value(12, '1'));
+        ASSERT_EQ(read_result, Value(16, '1'));
       } else {
         // Read PLog get a value
-        Value pbrb_v1 = Value(12, '1');
+        Value pbrb_v1 = Value(16, '1');
         TimeStamp ts_step1;
         ts_step1.getNow();
         bool status = pbrb.write(vPtr->getTimestamp(), ts_step1, k1.schemaId,
@@ -135,9 +135,7 @@ bool generateKV(uint32_t length, std::vector<Value> &values,
     Value v;
     v.append(padding)
         .append(pk)
-        .append(padding)
         .append(f1)
-        .append(padding)
         .append(f2);
     // ASSERT_EQ(v.size(), 44);
     values.emplace_back(v);
@@ -222,7 +220,7 @@ TEST(PBRBTest, Test02) {
               pbrb.read(vPtr->getTimestamp(), tsRead, vPtr->getPBRBAddr(),
                         key.schemaId, read_result, vPtr);
           ASSERT_EQ(status, true);
-          ASSERT_EQ(read_result, values[pk - 1]);
+          EXPECT_EQ(read_result, values[pk - 1]);
         } else {
           // Read PLog get a value
           pbrb.schemaMiss(schema02.schemaId);
@@ -268,7 +266,7 @@ TEST(PBRBTest, Test03) {
   auto &indexer = indexerList[1];
   std::vector<uint64_t> seq[] = {
       {1, 2, 3, 4, 5}, {6, 7, 8, 9, 10}, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}};
-  std::vector<uint64_t> sleepTime{3, 3, 3};
+  std::vector<uint64_t> sleepTime{1, 1, 1};
   // Cache 0 ~ 4:
   for (int i = 0; i < 3; i++) {
     PointProfiler timer;

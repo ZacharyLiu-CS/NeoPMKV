@@ -25,7 +25,7 @@ std::string clean_cmd = std::string("rm -rf ") + std::string(db_path);
 std::string mkdir_cmd = std::string("mkdir -p ") + std::string(db_path);
 
 std::vector<SchemaField> Fields{SchemaField(FieldType::INT64T, "pk"),
-                                SchemaField(FieldType::STRING, "f1", 8),
+                                SchemaField(FieldType::STRING, "f1", 16),
                                 SchemaField(FieldType::STRING, "f2", 16)};
 const uint64_t chunk_size = 128ull << 20;
 const uint64_t db_size = 1ull << 30;
@@ -63,7 +63,7 @@ void PBRBTest(bool enablePBRB = false, bool asyncPBRB = false) {
 
   auto BuildPartialValue = [](uint64_t i) -> Value {
     std::string num_str = std::to_string(i);
-    int zero_padding = 20 - num_str.size();
+    int zero_padding = 16 - num_str.size();
     Value v;
     v.append(zero_padding, '0').append(num_str);
     return v;

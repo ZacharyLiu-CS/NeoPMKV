@@ -61,21 +61,6 @@ class BufferPage {
     memcpy(destPtr, sPtr, size);
   }
 
-  // Read from pagePtr + offset with size to srcPtr;
-  template <typename T>
-  inline T readFromPage(size_t offset, size_t size) const {
-    T result;
-    void *dPtr = static_cast<void *>(&result);
-    const void *sPtr = static_cast<const void *>(content + offset);
-    memcpy(dPtr, sPtr, size);
-    return result;
-  }
-
-  inline void readFromPage(size_t offset, size_t size, void *dPtr) const {
-    const void *sPtr = static_cast<const void *>(content + offset);
-    memcpy(dPtr, sPtr, size);
-  }
-
   // set (magic, 0, 2)
   inline void setMagicPage(uint16_t magic) {
     ((PageHeader *)content)->magic = magic;

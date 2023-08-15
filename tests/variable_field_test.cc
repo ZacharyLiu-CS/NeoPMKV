@@ -91,7 +91,7 @@ class ParserTest : public testing::Test {
  public:
   void SetUp() override {
     _memPoolPtr = new MemPool(4096, 64);
-    _parser = new Parser(_memPoolPtr);
+    _parser = new SchemaParser(_memPoolPtr);
   }
   Schema BuildSchema(std::string name, std::vector<NKV::SchemaField> &fields) {
     return _schemaAllocator.createSchema(name, 0, fields);
@@ -99,10 +99,11 @@ class ParserTest : public testing::Test {
   std::string FromUserToSeqRow(Schema *schemaPtr, std::vector<Value> &values) {
     return _parser->ParseFromUserWriteToSeq(schemaPtr, values);
   }
-  char * FromSeqToTwoPart(Schema *schemaPtr, std::string& seqValue){
+  char *FromSeqToTwoPart(Schema *schemaPtr, std::string &seqValue) {
     return _parser->ParseFromSeqToTwoPart(schemaPtr, seqValue);
   }
-  std::string FromTwoPartToSeq(Schema *schemaPtr, char* rowFiexdPart, char *rowVarPart){
+  std::string FromTwoPartToSeq(Schema *schemaPtr, char *rowFiexdPart,
+                               char *rowVarPart) {
     return _parser->ParseFromTwoPartToSeq(schemaPtr, rowFiexdPart, rowVarPart);
   }
   void TearDown() override {
@@ -113,7 +114,7 @@ class ParserTest : public testing::Test {
  private:
   SchemaAllocator _schemaAllocator;
   MemPool *_memPoolPtr = nullptr;
-  Parser *_parser = nullptr;
+  SchemaParser *_parser = nullptr;
 };
 
 TEST_F(ParserTest, TestSeqRowFormat) {
@@ -122,16 +123,27 @@ TEST_F(ParserTest, TestSeqRowFormat) {
       NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
       NKV::SchemaField(NKV::FieldType::VARSTR, "f2")};
   Schema test1 = BuildSchema("test1", fields1);
+  ValueReader valueReader(&test1);
+
   std::vector<Value> values1 = {"gg1", "gg2", "var2"};
   // row format :  | row size | field 0 | field 1 | field 2|
   std::string res = FromUserToSeqRow(&test1, values1);
+  Value field0, field1, field2;
+  valueReader.ExtractFieldFromRow(res.data(), 0, field0);
+  valueReader.ExtractFieldFromRow(res.data(), 1, field1);
+  valueReader.ExtractFieldFromRow(res.data(), 2, field2);
+  EXPECT_STREQ(values1[0].data(), field0.data());
+  EXPECT_STREQ(values1[1].data(), field1.data());
+  EXPECT_STREQ(values1[2].data(), field2.data());
   // for (auto& el : res)
-  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
-  // std::cout << '\n';
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff &
+  // (unsigned int)el) << " "; std::cout << '\n';
 
   EXPECT_EQ(*(uint32_t *)res.data(), 28);
-  EXPECT_EQ(((VarFieldContent *)(res.data() + 20))->contentSize , 4);
-  EXPECT_EQ(((VarFieldContent *)(res.data() + 20))->contentType , VarFieldType::FULL_DATA);
+  EXPECT_EQ(res.size(), 32);
+  EXPECT_EQ(((VarFieldContent *)(res.data() + 20))->contentSize, 4);
+  EXPECT_EQ(((VarFieldContent *)(res.data() + 20))->contentType,
+            VarFieldType::FULL_DATA);
 
   std::vector<NKV::SchemaField> fields2{
       NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
@@ -140,32 +152,60 @@ TEST_F(ParserTest, TestSeqRowFormat) {
   Schema test2 = BuildSchema("test2", fields2);
   std::vector<Value> values2 = {"gg1", "gg2", "var234567890123455678"};
   std::string res2 = FromUserToSeqRow(&test2, values2);
- 
-  // row format :  | row size | field 0 | field 1 | field 2 head| field 2 content |
-  //               0          4         12        20            32   
+
+  std::vector<Value> fieldValues(3);
+  ValueReader valueReader2(&test2);
+  valueReader2.ExtractFieldFromRow(res2.data(), 0, fieldValues[0]);
+  valueReader2.ExtractFieldFromRow(res2.data(), 1, fieldValues[1]);
+  valueReader2.ExtractFieldFromRow(res2.data(), 2, fieldValues[2]);
+  EXPECT_STREQ(values2[0].data(), fieldValues[0].data());
+  EXPECT_STREQ(values2[1].data(), fieldValues[1].data());
+  EXPECT_STREQ(values2[2].data(), fieldValues[2].data());
+
+  // row format :  | row size| row type | field 0 | field 1 | field 2 head|
+  // field 2 content |
+  //               0         2         4         12        20            32
   EXPECT_EQ(*(uint32_t *)res2.data(), 49);
-  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentSize , 21);
-  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentType , VarFieldType::ROW_OFFSET);
-  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentOffset , 12);
-  
+  EXPECT_EQ(res2.size(), 53);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentSize, 21);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentType,
+            VarFieldType::ROW_OFFSET);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentOffset, 12);
+
   //   for (auto& el : res2)
-  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
-  // std::cout << '\n';
-  char * varPart = FromSeqToTwoPart(&test2, res2);
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff &
+  // (unsigned int)el) << " "; std::cout << '\n';
+  char *varPart = FromSeqToTwoPart(&test2, res2);
   //  for (auto& el : res2)
-  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
-  // std::cout << '\n';
-  // printf("variable part: %s\n", varPart);
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff &
+  // (unsigned int)el) << " "; std::cout << '\n'; printf("variable part: %s\n",
+  // varPart);
+  std::vector<Value> fieldValues2(3);
+  valueReader2.ExtractFieldFromRow(res2.data(), 0, fieldValues2[0]);
+  valueReader2.ExtractFieldFromRow(res2.data(), 1, fieldValues2[1]);
+  valueReader2.ExtractFieldFromRow(res2.data(), 2, fieldValues2[2]);
+  EXPECT_STREQ(values2[0].data(), fieldValues2[0].data());
+  EXPECT_STREQ(values2[1].data(), fieldValues2[1].data());
+  EXPECT_STREQ(values2[2].data(), fieldValues2[2].data());
 
   EXPECT_EQ(*(uint32_t *)res2.data(), 49);
   EXPECT_EQ(res2.size(), 32);
   EXPECT_NE(varPart, nullptr);
 
   std::string res3 = FromTwoPartToSeq(&test2, res2.data(), varPart);
-  EXPECT_EQ(res2.substr(0,24), res3.substr(0,24));
+  EXPECT_EQ(*(uint32_t *)res3.data(), 49);
+  EXPECT_EQ(res3.size(), 53);
+  EXPECT_EQ(res2.substr(0, 24), res3.substr(0, 24));
   //  for (auto& el : res3)
-  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff & (unsigned int)el) << " ";
-  // std::cout << '\n';
+  // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff &
+  // (unsigned int)el) << " "; std::cout << '\n';
+  std::vector<Value> fieldValues3(3);
+  valueReader2.ExtractFieldFromRow(res3.data(), 0, fieldValues3[0]);
+  valueReader2.ExtractFieldFromRow(res3.data(), 1, fieldValues3[1]);
+  valueReader2.ExtractFieldFromRow(res3.data(), 2, fieldValues3[2]);
+  EXPECT_STREQ(values2[0].data(), fieldValues3[0].data());
+  EXPECT_STREQ(values2[1].data(), fieldValues3[1].data());
+  EXPECT_STREQ(values2[2].data(), fieldValues3[2].data());
 }
 
 }  // namespace NKV

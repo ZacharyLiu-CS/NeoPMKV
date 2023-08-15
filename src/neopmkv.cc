@@ -17,10 +17,23 @@
 #include "timestamp.h"
 
 namespace NKV {
+
+SchemaId NeoPMKV::createSchema(vector<SchemaField> fields,
+                               uint32_t primarykey_id, string name) {
+  Schema newSchema = _schemaAllocator.createSchema(name, primarykey_id, fields);
+  _sMap.addSchema(newSchema);
+  _sParser.insert({newSchema.schemaId, SchemaParser(_memPoolPtr)});
+  _indexerList.insert({newSchema.schemaId, std::make_shared<IndexerT>()});
+  if (_enable_pbrb == true) {
+    _pbrb->createCacheForSchema(newSchema.schemaId);
+  }
+  return newSchema.schemaId;
+}
+
 bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
                                         std::shared_ptr<IndexerT> indexer,
-                                        SchemaId schemaid, Value &value,
-                                        std::vector<uint32_t> &fields) {
+                                        SchemaId schemaid, vector<Value> &value,
+                                        vector<uint32_t> &fields) {
   if (idxIter == indexer->end()) {
     return false;
   }
@@ -34,35 +47,29 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     // Read PBRB
     TimeStamp newTS;
     newTS.getNow();
-#ifdef ENABLE_STATISTICS
-    PointProfiler _timer;
-    _timer.start();
-#endif
+
+    POINT_PROFILE_START(_timer);
+
     bool status = _pbrb->read(oldTS, newTS, vPtr.getPBRBAddr(), schemaid, value,
                               &vPtr, fields);
-#ifdef ENABLE_STATISTICS
-    _timer.end();
-    _durationStat.pbrbReadCount.fetch_add(1);
-    _durationStat.pbrbReadTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+    POINT_PROFILE_END(_timer);
+    PROFILER_ATMOIC_ADD(_durationStat.pbrbReadCount, 1);
+    PROFILER_ATMOIC_ADD(_durationStat.pbrbReadTimeNanoSecs, _timer.duration());
 
     return true;
   }
 
   // Read PLog get a value
-#ifdef ENABLE_STATISTICS
-  PointProfiler _timer;
-  _timer.start();
-#endif
+  POINT_PROFILE_START(pmem_timer);
   _engine_ptr->read(vPtr.getPmemAddr(), value);
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.pmemReadCount.fetch_add(1);
-  _durationStat.pmemReadTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(pmem_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemReadCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemReadTimeNanoSecs,
+                      pmem_timer.duration());
+
   if (_enable_pbrb == false) {
     if (fields.size() != 0) {
-      auto schema = _sUMap.find(schemaid);
+      auto schema = _sMap.find(schemaid);
       auto field_offset = schema->getPBRBOffset(fields[0]);
       auto field_size = schema->getSize(fields[0]) + FieldHeadSize;
       value = value.substr(field_offset, field_size);
@@ -71,19 +78,18 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   }
   TimeStamp newTs;
   newTs.getNow();
+
   _pbrb->schemaMiss(schemaid);
 
-#ifdef ENABLE_STATISTICS
-  _timer.start();
-#endif
+  POINT_PROFILE_START(pbrb_timer);
   bool status = _pbrb->write(oldTS, newTs, schemaid, value, idxIter);
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.pbrbWriteCount.fetch_add(1);
-  _durationStat.pbrbWriteTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(pbrb_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.pbrbWriteCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.pbrbWriteTimeNanoSecs,
+                      pbrb_timer.duration());
+
   if (fields.size() != 0) {
-    auto schema = _sUMap.find(schemaid);
+    auto schema = _sMap.find(schemaid);
     auto field_offset = schema->getPBRBOffset(fields[0]);
     auto field_size = schema->getSize(fields[0]) + FieldHeadSize;
     value = value.substr(field_offset, field_size);
@@ -91,65 +97,48 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   return true;
 }
 
-bool NeoPMKV::get(Key &key, std::string &value, std::vector<uint32_t> fields) {
-#ifdef ENABLE_STATISTICS
-  PointProfiler getTimer;
-  getTimer.start();
-#endif
+bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
+                              vector<uint32_t> fields) {
+  POINT_PROFILE_START(overall_timer);
   auto indexer = _indexerList[key.schemaId];
 
-#ifdef ENABLE_STATISTICS
-  PointProfiler _timer;
-  _timer.start();
-#endif
+  POINT_PROFILE_START(index_timer);
 
   IndexerIterator idxIter = indexer->find(key.primaryKey);
 
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.indexQueryCount.fetch_add(1);
-  _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(index_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs, index_timer.duration());
+
   // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
   //           idxIter->second);
-#ifdef ENABLE_STATISTICS
-  PointProfiler _overallTimer;
-  _overallTimer.start();
-#endif
+  POINT_PROFILE_START(get_timer);
   bool status =
       getValueFromIndexIterator(idxIter, indexer, key.schemaId, value, fields);
 
-#ifdef ENABLE_STATISTICS
-  _overallTimer.end();
-  _durationStat.GetValueFromIteratorCount.fetch_add(1);
-  _durationStat.GetValueFromIteratorTimeNanoSecs.fetch_add(
-      _overallTimer.duration());
-#endif
-#ifdef ENABLE_STATISTICS
-  getTimer.end();
-  _durationStat.GetInterfaceCount.fetch_add(1);
-  _durationStat.GetInterfaceTimeNanoSecs.fetch_add(getTimer.duration());
-#endif
+  POINT_PROFILE_END(get_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorTimeNanoSecs,
+                      get_timer.duration());
+
+  POINT_PROFILE_END(overall_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.GetInterfaceCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.GetInterfaceTimeNanoSecs,
+                      overall_timer.duration());
   return status;
 }
 
-bool NeoPMKV::put(Key &key, const std::string &value) {
-
+bool NeoPMKV::Put(Key &key, const string &value) {
   auto indexer = _indexerList[key.schemaId];
 
   PmemAddress pmAddr;
-
-#ifdef ENABLE_STATISTICS
-  PointProfiler _timer;
-  _timer.start();
-#endif
+  POINT_PROFILE_START(pmem_timer);
   Status s = _engine_ptr->append(pmAddr, value.c_str(), value.size());
 
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.pmemWriteCount.fetch_add(1);
-  _durationStat.pmemWriteTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(pmem_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemWriteCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemWriteTimeNanoSecs,
+                      pmem_timer.duration());
 
   if (!s.is2xxOK()) return false;
   TimeStamp putTs;
@@ -157,17 +146,14 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
   ValuePtr vPtr(pmAddr, putTs);
 
   // try to insert
-#ifdef ENABLE_STATISTICS
-  _timer.start();
-#endif
 
+  POINT_PROFILE_START(index_timer);
   auto [iter, status] = indexer->insert({key.primaryKey, vPtr});
 
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.indexInsertCount.fetch_add(1);
-  _durationStat.indexInsertTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(index_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.indexInsertCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexInsertTimeNanoSecs,
+                      index_timer.duration());
   // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value, vPtr);
   // status is true means insert success, we don't have the kv before
   if (status == true) return true;
@@ -179,22 +165,16 @@ bool NeoPMKV::put(Key &key, const std::string &value) {
 
   return true;
 }
-bool NeoPMKV::update(Key &key,
-                     std::vector<std::pair<std::string, std::string>> &values) {
-
+bool NeoPMKV::Update(Key &key, vector<pair<string, string>> &values) {
   auto indexer = _indexerList[key.schemaId];
-#ifdef ENABLE_STATISTICS
-  PointProfiler _timer;
-  _timer.start();
-#endif
 
+  POINT_PROFILE_START(index_timer);
   IndexerIterator idxIter = indexer->find(key.primaryKey);
 
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.indexQueryCount.fetch_add(1);
-  _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(index_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
+                      index_timer.duration());
 
   if (idxIter == indexer->end()) return false;
   ValuePtr &vPtr = idxIter->second;
@@ -202,39 +182,32 @@ bool NeoPMKV::update(Key &key,
   TimeStamp updatetTs;
   updatetTs.getNow();
 
-#ifdef ENABLE_STATISTICS
-  _timer.start();
-#endif
+  POINT_PROFILE_START(pmem_timer);
   for (const auto &[fieldName, fieldContent] : values) {
-    uint32_t fieldOffset = _sUMap.find(key.schemaId)->getPmemOffset(fieldName);
+    uint32_t fieldOffset = _sMap.find(key.schemaId)->getPmemOffset(fieldName);
     _engine_ptr->write(pmemAddr + fieldOffset, fieldContent.c_str(),
                        fieldContent.size());
   }
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.pmemUpdateCount.fetch_add(1);
-  _durationStat.pmemUpdateTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(pmem_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateTimeNanoSecs,
+                      pmem_timer.duration());
 
   vPtr.setColdPmemAddr(pmemAddr, updatetTs);
   return true;
 }
-bool NeoPMKV::update(Key &key,
-                     std::vector<std::pair<uint32_t, std::string>> &values) {
+bool NeoPMKV::PartialUpdate(Key &key, pair<uint32_t, Value> &fiedldValue) {}
+bool NeoPMKV::MultiPartialUpdate(Key &key,
+                                 vector<pair<uint32_t, Value>> &values) {
   auto indexer = _indexerList[key.schemaId];
 
-#ifdef ENABLE_STATISTICS
-  PointProfiler _timer;
-  _timer.start();
-#endif
-
+  POINT_PROFILE_START(index_timer);
   IndexerIterator idxIter = indexer->find(key.primaryKey);
 
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.indexQueryCount.fetch_add(1);
-  _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(index_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
+                      index_timer.duration());
 
   if (idxIter == indexer->end()) return false;
   ValuePtr &vPtr = idxIter->second;
@@ -242,25 +215,22 @@ bool NeoPMKV::update(Key &key,
   TimeStamp updatetTs;
   updatetTs.getNow();
 
-#ifdef ENABLE_STATISTICS
-  _timer.start();
-#endif
+  POINT_PROFILE_START(pmem_timer);
   for (const auto &[fieldId, fieldContent] : values) {
-    uint32_t fieldOffset = _sUMap.find(key.schemaId)->getPmemOffset(fieldId);
+    uint32_t fieldOffset = _sMap.find(key.schemaId)->getPmemOffset(fieldId);
     _engine_ptr->write(pmemAddr + fieldOffset, fieldContent.c_str(),
                        fieldContent.size());
   }
 
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.pmemUpdateCount.fetch_add(1);
-  _durationStat.pmemUpdateTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(pmem_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateTimeNanoSecs,
+                      pmem_timer.duration());
 
   vPtr.setColdPmemAddr(pmemAddr, updatetTs);
   return true;
 }
-bool NeoPMKV::remove(Key &key) {
+bool NeoPMKV::Remove(Key &key) {
   auto indexer = _indexerList[key.schemaId];
 
   IndexerIterator idxIter = indexer->find(key.primaryKey);
@@ -274,44 +244,37 @@ bool NeoPMKV::remove(Key &key) {
   indexer->unsafe_erase(idxIter);
   return true;
 }
-bool NeoPMKV::scan(Key &start, std::vector<std::string> &value_list,
-                   uint32_t scan_len, std::vector<uint32_t> fields) {
-
+bool NeoPMKV::Scan(Key &start, vector<Value> &value_list, uint32_t scan_len) {}
+bool NeoPMKV::PartialScan(Key &start, vector<Value> &value_list,
+                          uint32_t scan_len, uint32_t field) {
   auto indexer = _indexerList[start.schemaId];
 
-#ifdef ENABLE_STATISTICS
-  PointProfiler _timer;
-  _timer.start();
-#endif
+  POINT_PROFILE_START(index_timer);
 
   auto iter = indexer->upper_bound(start.primaryKey);
 
-#ifdef ENABLE_STATISTICS
-  _timer.end();
-  _durationStat.indexQueryCount.fetch_add(1);
-  _durationStat.indexQueryTimeNanoSecs.fetch_add(_timer.duration());
-#endif
+  POINT_PROFILE_END(index_timer);
 
-#ifdef ENABLE_STATISTICS
-  PointProfiler _overallTimer;
-  _overallTimer.start();
-#endif
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
+                      index_timer.duration());
+
+  POINT_PROFILE_START(get_value);
 
   for (auto i = 0; i < scan_len && iter != indexer->end(); i++, iter++) {
-    std::string tmp_value;
+    string tmp_value;
     getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value, fields);
     value_list.push_back(tmp_value);
   }
-#ifdef ENABLE_STATISTICS
-  _overallTimer.end();
-  _durationStat.GetValueFromIteratorCount.fetch_add(scan_len);
-  _durationStat.GetValueFromIteratorTimeNanoSecs.fetch_add(
-      _overallTimer.duration());
-#endif
+  POINT_PROFILE_END(get_value);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorCount, scan_len);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorTimeNanoSecs,
+                      get_value.duration());
   return true;
 }
-#ifdef ENABLE_STATISTICS
+
 void NeoPMKV::outputReadStat() {
+#ifdef ENABLE_STATISTICS
   NKV_LOG_I(std::cout, " Enable pbrb: {}, async pbrb: {}", _enable_pbrb,
             _async_pbrb);
   NKV_LOG_I(
@@ -381,7 +344,7 @@ void NeoPMKV::outputReadStat() {
             _durationStat.pbrbWriteTimeNanoSecs.load() / (double)NANOSEC_BASE,
             _durationStat.pbrbWriteTimeNanoSecs.load() /
                 (double)_durationStat.pbrbWriteCount.load());
-}
 #endif
+}
 
 }  // namespace NKV

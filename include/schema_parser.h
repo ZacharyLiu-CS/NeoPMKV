@@ -33,23 +33,37 @@ enum MovementTpye : uint8_t {
   FROM_CACHE_TO_SEQ,
 };
 
-
 using Value = std::string;
+using std::string;
+using std::vector;
 
-class Parser {
+class SchemaParser {
  public:
-  Parser(MemPool *globalPool) : _globalPool(globalPool) {}
+  SchemaParser(MemPool *globalPool) : _globalPool(globalPool) {}
 
-  std::string ParseFromUserWriteToSeq(Schema *schemaPtr,
-                                       std::vector<Value> &fieldValues);
+  // parse from the user write to the string
+  string ParseFromUserWriteToSeq(Schema *schemaPtr, vector<Value> &fieldValues);
+  // not only parse from the seq format, but also use memory pool to allocate
+  // space and copy the variable part into it
+  // not move the seqValue, just shrink the space
+  char *ParseFromSeqToTwoPart(Schema *schemaPtr, string &seqValue,
+                              bool loadVarPartToCache = true);
 
-  char* ParseFromSeqToTwoPart(Schema *schemaPtr, std::string& seqValue, bool loadVarPartToCache = true);
-
-  std::string ParseFromTwoPartToSeq(Schema *schemaPtr, char* rowFiexdPart, char* rowVarPart);
-
+  // combine the fixed part and variable part, and move the data into a new one
+  string ParseFromTwoPartToSeq(Schema *schemaPtr, char *rowFiexdPart,
+                               char *rowVarPart);
 
  private:
   MemPool *_globalPool = nullptr;
+};
+
+class ValueReader {
+ public:
+ ValueReader(Schema *schemaPtr) :_schemaPtr(schemaPtr){}
+  bool ExtractFieldFromRow(char *rowPtr, uint32_t fieldId, Value &value);
+
+ private:
+  Schema *_schemaPtr = nullptr;
 };
 
 }  // end of namespace NKV

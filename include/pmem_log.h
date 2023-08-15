@@ -53,7 +53,8 @@ class PmemLog : public PmemEngine {
 
   Status read(PmemAddress readAddr, std::string &value) override;
 
-  Status read(PmemAddress readAddr, std::string& value, uint32_t size) override;
+  Status read(PmemAddress readAddr, std::string &value, Schema *schemPtr,
+              uint32_t fieldId) override;
 
   Status seal() override;
 
@@ -91,6 +92,13 @@ class PmemLog : public PmemEngine {
     return now_tail_offset;
   }
 
+  inline char *_convertToPtr(PmemAddress src) {
+    uint32_t chunk_id = src / _plog_meta.chunk_size;
+    char *pmem_addr =
+        _chunk_list[chunk_id].pmem_addr + src % _plog_meta.chunk_size;
+    NKV_LOG_D(std::cout, "Convert from: {} => {}", src, pmem_addr);
+    return pmem_addr;
+  }
   // private _read function to read data from given offset and length
   inline void _read(char *dst, PmemAddress src, uint32_t len) {
     NKV_LOG_D(std::cout, "Read data: offset =>{},len=>{}", src, len);
@@ -120,12 +128,12 @@ class PmemLog : public PmemEngine {
   //            return S201_Created_File
   inline Status _mapExistingFile(std::string chunk_file, char **pmem_addr) {
     size_t mapped_len;
-      if ((*pmem_addr = static_cast<char *>(pmem_map_file(
-               chunk_file.c_str(), 0, 0, 0666, &mapped_len, &_is_pmem))) ==
-          NULL) {
-        NKV_LOG_E(std::cerr, "pmem map existing file fail!");
-        return PmemStatuses::S500_Internal_Server_Error_Map_Fail;
-      }
+    if ((*pmem_addr = static_cast<char *>(pmem_map_file(
+             chunk_file.c_str(), 0, 0, 0666, &mapped_len, &_is_pmem))) ==
+        NULL) {
+      NKV_LOG_E(std::cerr, "pmem map existing file fail!");
+      return PmemStatuses::S500_Internal_Server_Error_Map_Fail;
+    }
     return PmemStatuses::S200_OK_Map;
   }
 
@@ -147,12 +155,12 @@ class PmemLog : public PmemEngine {
 
     // create the target file
     size_t mapped_len;
-      if ((*pmemAddr = static_cast<char *>(pmem_map_file(
-               file_name.c_str(), file_size, PMEM_FILE_CREATE | PMEM_FILE_EXCL,
-               0666, &mapped_len, &_is_pmem))) == NULL) {
-        NKV_LOG_E(std::cerr, "pmem create existing file!");
-        return PmemStatuses::S409_Conflict_File_Existed;
-      }
+    if ((*pmemAddr = static_cast<char *>(pmem_map_file(
+             file_name.c_str(), file_size, PMEM_FILE_CREATE | PMEM_FILE_EXCL,
+             0666, &mapped_len, &_is_pmem))) == NULL) {
+      NKV_LOG_E(std::cerr, "pmem create existing file!");
+      return PmemStatuses::S409_Conflict_File_Existed;
+    }
     return PmemStatuses::S201_Created_File;
   }
   inline Status _addNewChunk() {

@@ -17,6 +17,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+#include "mempool.h"
 #include "profiler.h"
 #include "timestamp.h"
 
@@ -185,17 +186,16 @@ inline void EncodeToVarFieldFullData(void *dst, void *content, uint32_t size) {
   dstPtr->contentType = type_;
   dstPtr->contentSize = size;
   std::memcpy(dstPtr->contentData, content, size);
-
 }
 
 inline void EncodeToVarFieldNotCache(void *dst) {
   VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
-  
+
   dstPtr->contentType = VarFieldType::NOT_CACHE;
   dstPtr->contentOffset = 0;
 }
 inline void EncodeToVarFieldOnlyPointer(void *dst, void *content,
-                                   uint32_t size) {
+                                        uint32_t size) {
   VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
   VarFieldType type_ = VarFieldType::ONLY_PONTER;
   assert(size > 8);
@@ -214,7 +214,6 @@ inline void EncodeToVarFieldOffset(void *dst, uint64_t contentOffset,
   dstPtr->contentOffset = contentOffset;
 }
 
-
 inline uint32_t GetVarFieldSize(void *dst) {
   return reinterpret_cast<VarFieldContent *>(dst)->contentSize;
 }
@@ -227,6 +226,13 @@ inline auto GetVarFieldContent(void *dst) {
   } else {
     return (char *)reinterpret_cast<VarFieldContent *>(dst)->contentPtr;
   }
+}
+inline bool FreeVarFieldContent(void *dst, MemPool *poolPtr){
+  if (GetVarFieldType(dst) == VarFieldType::ONLY_PONTER){
+    poolPtr->Free(GetVarFieldContent(dst));
+    return true;
+  }
+  return true;
 }
 
 struct SchemaField {
@@ -266,6 +272,7 @@ struct Schema {
   uint32_t primaryKeyField = 0;
   // define the schema data size
   uint32_t size = 0;
+  uint32_t fixedFieldSize = 0;
   // all field attributes
   // meta data of field in storage
   bool hasVariableField = false;
@@ -279,60 +286,48 @@ struct Schema {
         schemaId(schemaId),
         primaryKeyField(primaryKeyField),
         fields(fields) {
-    (void)getSize();
-    uint32_t currentOffset = AllFieldConentSize;
+    size += AllFieldConentSize;
     for (auto i : fields) {
       fieldsMeta.push_back(FieldMetaData());
       auto &field_meta = fieldsMeta.back();
       field_meta.fieldSize = i.size;
-      field_meta.fieldOffset = currentOffset;
+      field_meta.fieldOffset = size;
       field_meta.isNullable = false;
       field_meta.isVariable = false;
-      currentOffset += i.size + FieldHeadSize;
+      size += i.size;
+      fixedFieldSize += i.size;
       if (i.type == FieldType::VARSTR) {
         hasVariableField = true;
         field_meta.isVariable = true;
       }
     }
   }
-  uint32_t getAllFixedFieldSize() {
-    int all_field_size = 0;
-    for (auto &i : fields) all_field_size += i.size;
-    return all_field_size;
-  }
-  uint32_t getSize() {
-    if (size != 0) return size;
-    size += AllFieldConentSize ;
-    // Initializa the size
-    for (auto &i : fields) size += i.size + FieldHeadSize;
-    return size;
-  }
+  uint32_t getAllFixedFieldSize() { return fixedFieldSize; }
+  uint32_t getSize() { return size; }
   inline uint32_t getSize(uint32_t fieldId) {
     return fieldsMeta[fieldId].fieldSize;
+  }
+  inline uint32_t getFieldId(const std::string &fieldName) {
+    uint32_t fieldId = 0;
+    for (auto &i : fields) {
+      if (i.name == fieldName) break;
+      fieldId += 1;
+    }
+    return fieldId;
   }
 
   inline uint32_t getPmemOffset(uint32_t fieldId) {
     return fieldsMeta[fieldId].fieldOffset;
   }
   inline uint32_t getPmemOffset(const std::string &fieldName) {
-    uint32_t fieldId = 0;
-    for (auto i : fields) {
-      if (i.name == fieldName) break;
-      fieldId += 1;
-    }
-    return getPmemOffset(fieldId);
+    return getPmemOffset(getFieldId(fieldName));
   }
 
   inline uint32_t getPBRBOffset(uint32_t fieldId) {
     return fieldsMeta[fieldId].fieldOffset;
   }
   inline uint32_t getPBRBOffset(const std::string &fieldName) {
-    uint32_t fieldId = 0;
-    for (auto i : fields) {
-      if (i.name == fieldName) break;
-      fieldId += 1;
-    }
-    return getPBRBOffset(fieldId);
+    return getPBRBOffset(getFieldId(fieldName));
   }
 };
 

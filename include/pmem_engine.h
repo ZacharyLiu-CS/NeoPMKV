@@ -184,7 +184,7 @@ class PmemEngine {
 
   virtual Status read(PmemAddress readAddr, std::string& value) = 0;
 
-  virtual Status read(PmemAddress readAddr, std::string& value, uint32_t size) = 0;
+  virtual Status read(PmemAddress readAddr, std::string& value, Schema *schemPtr, uint32_t fieldId) =0;
 
   virtual Status seal() = 0;
 

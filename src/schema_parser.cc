@@ -27,8 +27,8 @@
 
 namespace NKV {
 
-std::string Parser::ParseFromUserWriteToSeq(Schema *schemaPtr,
-                                            std::vector<Value> &fieldValues) {
+std::string SchemaParser::ParseFromUserWriteToSeq(
+    Schema *schemaPtr, std::vector<Value> &fieldValues) {
   std::string result;
   uint32_t seqRowSize = 0;     // record the row size
   uint32_t fixedPartSize = 0;  // record the fixed part size
@@ -61,7 +61,7 @@ std::string Parser::ParseFromUserWriteToSeq(Schema *schemaPtr,
     const char *src_ptr = fieldValues[i].c_str();
     // not variable field
     if (schemaPtr->fieldsMeta[i].isVariable == false) {
-      memcpy(destPtr, src_ptr, size);
+      memcpy(destPtr, src_ptr, fieldValues[i].size());
       destPtr += size;
       continue;
     }
@@ -83,9 +83,10 @@ std::string Parser::ParseFromUserWriteToSeq(Schema *schemaPtr,
   return result;
 }
 
-char *Parser::ParseFromSeqToTwoPart(Schema *schemaPtr, std::string &seqValue,
-                                    bool loadVarPartToCache) {
-  uint32_t rowFixedPartSize = schemaPtr->size + sizeof(uint32_t);
+char *SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
+                                          std::string &seqValue,
+                                          bool loadVarPartToCache) {
+  uint32_t rowFixedPartSize = schemaPtr->getSize();
   uint32_t rowVarPartSize = seqValue.size() - rowFixedPartSize;
 
   char *fieldPtr = seqValue.data() + sizeof(uint32_t);
@@ -124,13 +125,15 @@ char *Parser::ParseFromSeqToTwoPart(Schema *schemaPtr, std::string &seqValue,
   return varSpacePtr;
 }
 
-std::string Parser::ParseFromTwoPartToSeq(Schema *schemaPtr, char *rowFiexdPart,
-                                          char *rowVarPart) {
+std::string SchemaParser::ParseFromTwoPartToSeq(Schema *schemaPtr,
+                                                char *rowFiexdPart,
+                                                char *rowVarPart) {
   std::string res;
-  uint32_t rowFixedPartSize = schemaPtr->size + sizeof(uint32_t);
+  uint32_t rowFixedPartSize = schemaPtr->getSize();
   assert(rowVarPart != nullptr);
 
-  uint32_t rowVarPartSize = *(uint32_t *)rowFiexdPart - schemaPtr->size;
+  uint32_t rowVarPartSize =
+      *(uint32_t *)rowFiexdPart - schemaPtr->getAllFixedFieldSize();
   res.resize(rowFixedPartSize + rowVarPartSize);
   memcpy(res.data(), rowFiexdPart, rowFixedPartSize);
   memcpy(res.data() + rowFixedPartSize, rowVarPart, rowVarPartSize);
@@ -155,5 +158,46 @@ std::string Parser::ParseFromTwoPartToSeq(Schema *schemaPtr, char *rowFiexdPart,
 
   return res;
 }
+bool ValueReader::ExtractFieldFromRow(char *rowPtr, uint32_t fieldId,
+                                      Value &value) {
+  // decide if it is variable
+  bool isVariable = _schemaPtr->fieldsMeta[fieldId].isVariable;
+  if (isVariable == false) {
+    uint32_t fieldSize = _schemaPtr->getSize(fieldId);
+    value.resize(fieldSize);
+    memcpy(value.data(), rowPtr + _schemaPtr->getPBRBOffset(fieldId),
+           fieldSize);
+    return true;
+  }
+  // variable field and is smaller than 8B
+  VarFieldContent *varFieldPtr = reinterpret_cast<VarFieldContent *>(
+      rowPtr + _schemaPtr->getPBRBOffset(fieldId));
+  uint32_t fieldSize = varFieldPtr->contentSize;
+  VarFieldType fieldType = varFieldPtr->contentType;
+
+  if (fieldType == VarFieldType::FULL_DATA) {
+    value.resize(fieldSize);
+    memcpy(value.data(), varFieldPtr->contentData, fieldSize);
+    return true;
+  }
+  // store the value in seq row
+  if (fieldType == VarFieldType::ROW_OFFSET) {
+    value.resize(fieldSize, 0);
+    memcpy(value.data(), (char*)varFieldPtr + varFieldPtr->contentOffset, fieldSize);
+    return true;
+  }
+  // store the value in the heap space
+  if (fieldType == VarFieldType::ONLY_PONTER) {
+    value.resize(fieldSize);
+    memcpy(value.data(), varFieldPtr->contentPtr, fieldSize);
+    return true;
+  }
+  if (fieldType == VarFieldType::NULL_T) {
+    return true;
+  }
+  // NOT in Cache
+  return false;
+}
+
 
 }  // namespace NKV

@@ -14,6 +14,7 @@
 
 std::string testBaseDir = "/mnt/pmem0/NKV-TEST";
 NKV::PmemEngine *engine_ptr = nullptr;
+#define HEADER_SIZE sizeof(uint32_t)
 
 void CleanTestFile() {
   bool status = false;
@@ -54,7 +55,9 @@ TEST(AppendTest, AppendSmallData) {
   ASSERT_TRUE(status.is2xxOK());
   int value_length = 128;
   char *value = (char *)std::malloc(value_length);
-  memset(value, 43, value_length);
+  *(uint32_t *)value = value_length - 4;
+
+  memset(value + HEADER_SIZE, 43, value_length - HEADER_SIZE);
   NKV::PmemAddress pmem_addr;
   auto result = engine_ptr->append(pmem_addr, value, value_length);
   ASSERT_TRUE(result.is2xxOK());
@@ -71,7 +74,10 @@ TEST(ReadTest, ReadSmallData) {
   int value_length = 128;
 
   char *old_value = (char *)std::malloc(value_length);
-  memset(old_value, 43, value_length);
+
+  *(uint32_t *)old_value = value_length - 4;
+
+  memset(old_value + HEADER_SIZE, 43, value_length - HEADER_SIZE);
 
   std::string new_value;
 
@@ -92,14 +98,16 @@ TEST(AppendTest, AppendLargeData) {
   // first large write
   int value_length = 2 << 20;
   char *value = (char *)std::malloc(value_length);
-  memset(value, 44, value_length);
+  *(uint32_t *)value = value_length - 4;
+
+  memset(value + HEADER_SIZE, 44, value_length - HEADER_SIZE);
   NKV::PmemAddress pmem_addr;
   auto result = engine_ptr->append(pmem_addr, value, value_length);
   ASSERT_TRUE(result.is2xxOK());
-  ASSERT_EQ(pmem_addr, 132);
+  ASSERT_EQ(pmem_addr, 128);
 
   // second larege write
-  memset(value, 45, value_length);
+  memset(value + HEADER_SIZE, 45, value_length - HEADER_SIZE);
   result = engine_ptr->append(pmem_addr, value, value_length);
   ASSERT_TRUE(result.is2xxOK());
   ASSERT_EQ(pmem_addr, 2 * value_length);
@@ -115,10 +123,11 @@ TEST(ReadTest, ReadLargeData) {
   int value_length = 2 << 20;
   char *old_value = (char *)std::malloc(value_length);
 
-  memset(old_value, 44, value_length);
+  *(uint32_t *)old_value = value_length -4;
+  memset(old_value + HEADER_SIZE, 44, value_length - HEADER_SIZE);
 
   std::string new_value;
-  NKV::PmemAddress pmem_addr = 132;
+  NKV::PmemAddress pmem_addr = 128;
   auto result = engine_ptr->read(pmem_addr, new_value);
   ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length), 0);
 
@@ -128,29 +137,29 @@ TEST(ReadTest, ReadLargeData) {
   CleanTestFile();
 }
 
-
 TEST(MultiThreadTest, ConcurrentAccessPmemLog) {
   NKV::PmemEngineConfig plogConfig;
   plogConfig.chunk_size = 1ull << 10;
   strcpy(plogConfig.engine_path, testBaseDir.c_str());
   auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
   ASSERT_TRUE(status.is2xxOK());
-  int value_length = 64 - 4;
+  int value_length = 64;
   int num_threads = 16;
   int total_ops = 1ull << 10;
   auto writeToPmemLog = [=](int num_ops) {
     std::string value;
     for (auto i = 0; i < num_ops; i++) {
       value.resize(value_length);
+      *(uint32_t *)value.data() = value_length - HEADER_SIZE;
       NKV::PmemAddress addr = 0;
       engine_ptr->append(addr, value.c_str(), value_length);
-      ASSERT_EQ(addr % (value_length+4), 0);
+      ASSERT_EQ(addr % (value_length ), 0);
     }
   };
   std::vector<std::future<void>> future_pool;
   for (auto i = 0; i < num_threads; i++) {
-    future_pool.push_back(
-        std::async(std::launch::async, writeToPmemLog, total_ops/num_threads));
+    future_pool.push_back(std::async(std::launch::async, writeToPmemLog,
+                                     total_ops / num_threads));
   }
   for (auto &i : future_pool) {
     i.wait();

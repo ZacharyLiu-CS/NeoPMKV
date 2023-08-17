@@ -30,7 +30,7 @@ using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
 const uint32_t PmemEntryHead = 0;
 const uint32_t FieldHeadSize = 0;
-const uint32_t AllFieldConentSize = sizeof(uint32_t);
+const uint32_t AllFieldHeadSize = sizeof(uint32_t);
 using RowAddr = void *;
 const uint32_t ERRMASK = 1 << 31;
 
@@ -227,12 +227,12 @@ inline auto GetVarFieldContent(void *dst) {
     return (char *)reinterpret_cast<VarFieldContent *>(dst)->contentPtr;
   }
 }
-inline bool FreeVarFieldContent(void *dst, MemPool *poolPtr){
-  if (GetVarFieldType(dst) == VarFieldType::ONLY_PONTER){
+inline bool FreeVarFieldContent(void *dst, MemPool *poolPtr) {
+  if (GetVarFieldType(dst) == VarFieldType::ONLY_PONTER) {
     poolPtr->Free(GetVarFieldContent(dst));
     return true;
   }
-  return true;
+  return false;
 }
 
 struct SchemaField {
@@ -286,7 +286,7 @@ struct Schema {
         schemaId(schemaId),
         primaryKeyField(primaryKeyField),
         fields(fields) {
-    size += AllFieldConentSize;
+    size += AllFieldHeadSize;
     for (auto i : fields) {
       fieldsMeta.push_back(FieldMetaData());
       auto &field_meta = fieldsMeta.back();
@@ -335,10 +335,11 @@ class SchemaAllocator {
   std::atomic_uint32_t idx{1};
 
  public:
-  Schema createSchema(std::string name, uint32_t primaryKeyField,
+  Schema CreateSchema(std::string name, uint32_t primaryKeyField,
                       std::vector<SchemaField> &fields) {
     return Schema(name, idx.fetch_add(1), primaryKeyField, fields);
   }
+  void clear() { idx.store(1); }
 };
 
 class SchemaUMap {
@@ -364,6 +365,7 @@ class SchemaUMap {
     auto it = _umap.find(schemaId);
     return it == _umap.end() ? nullptr : &(it->second);
   }
+  void clear(){_umap.clear();}
 
   decltype(_umap.begin()) begin() { return _umap.begin(); }
   decltype(_umap.end()) end() { return _umap.end(); }

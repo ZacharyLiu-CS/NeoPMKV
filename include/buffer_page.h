@@ -154,16 +154,19 @@ class BufferPage {
     value.resize(valueSize);
     memcpy(value.data(), valueAddr, valueSize);
   }
+  inline char* getValuePtr(RowAddr rAddr){
+    return (char *)rAddr + ROW_HEADER_SIZE;
+  }
   // fields -> vector<offset, size>
-  inline void getValueRow(RowAddr rAddr, uint32_t valueSize, Value &value,
+  inline void getValueRow(RowAddr rAddr, uint32_t valueSize, std::vector<Value> &values,
                           std::vector<std::pair<uint32_t, uint32_t>> &fields) {
     char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
-    value.resize(valueSize);
-    uint32_t value_offset = 0;
+    uint32_t i = 0;
     for (auto& [fieldOffset, fieldSize] : fields) {
-      memcpy(value.data() + value_offset, valueAddr + fieldOffset,
+      values[i].resize(fieldOffset);
+      memcpy(values[i].data() , valueAddr + fieldOffset,
              fieldSize + FieldHeadSize);
-      value_offset += fieldSize + FieldHeadSize;
+      i+=1;
     }
   }
   // need to

@@ -26,26 +26,28 @@
   } while (0)
 #endif
 
-// #define NKV_LOG_I(output, fmt_str, ...)                                       \
-//   do {                                                                        \
-//     fmt::print(output, FMT_STRING("[{}:{} @{} INFO] Thread:[{}] " fmt_str "\n"), \
-//                __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(),  \
-//                ##__VA_ARGS__);                                                \
-//   } while (0)
-// #define NKV_LOG_E(output, fmt_str, ...)                                        \
-//   do {                                                                         \
-//     fmt::print(output, FMT_STRING("[{}:{} @{} ERROR] Thread:[{}] " fmt_str "\n"), \
-//                __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(),   \
-//                ##__VA_ARGS__);                                                 \
-//   } while (0)
-
-#define NKV_LOG_I(fmt_str, ...) \
-  do {                          \
+#define NKV_LOG_I(output, fmt_str, ...)                                      \
+  do {                                                                       \
+    fmt::print(output,                                                       \
+               FMT_STRING("[{}:{} @{} INFO] Thread:[{}] " fmt_str "\n"),     \
+               __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(), \
+               ##__VA_ARGS__);                                               \
+  } while (0)
+#define NKV_LOG_E(output, fmt_str, ...)                                      \
+  do {                                                                       \
+    fmt::print(output,                                                       \
+               FMT_STRING("[{}:{} @{} ERROR] Thread:[{}] " fmt_str "\n"),    \
+               __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(), \
+               ##__VA_ARGS__);                                               \
   } while (0)
 
-#define NKV_LOG_E(fmt_str, ...) \
-  do {                          \
-  } while (0)
+// #define NKV_LOG_I(fmt_str, ...) \
+//   do {                          \
+//   } while (0)
+
+// #define NKV_LOG_E(fmt_str, ...) \
+//   do {                          \
+//   } while (0)
 
 #ifdef ENABLE_STATISTICS
 
@@ -64,7 +66,17 @@
   } while (0)
 
 #else
+
 #define POINT_PROFILE_START(var_name) \
   do {                                \
   } while (0)
+
+#define POINT_PROFILE_END(var_name) \
+  do {                              \
+  } while (0)
+
+#define PROFILER_ATMOIC_ADD(var_name, add_count) \
+  do {                                           \
+  } while (0)
+
 #endif

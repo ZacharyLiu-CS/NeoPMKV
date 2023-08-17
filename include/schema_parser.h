@@ -20,6 +20,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+#include "pmem_engine.h"
+#include "schema.h"
 
 namespace NKV {
 
@@ -39,19 +41,26 @@ using std::vector;
 
 class SchemaParser {
  public:
-  SchemaParser(MemPool *globalPool) : _globalPool(globalPool) {}
+  SchemaParser() { _globalPool = nullptr; }
+
+  SchemaParser(MemPool *globalPool = nullptr) : _globalPool(globalPool) {}
+
+  void Construct(MemPool *globalPool) { _globalPool = globalPool; }
 
   // parse from the user write to the string
-  string ParseFromUserWriteToSeq(Schema *schemaPtr, vector<Value> &fieldValues);
+  static string ParseFromUserWriteToSeq(Schema *schemaPtr,
+                                        vector<Value> &fieldValues);
   // not only parse from the seq format, but also use memory pool to allocate
   // space and copy the variable part into it
   // not move the seqValue, just shrink the space
-  char *ParseFromSeqToTwoPart(Schema *schemaPtr, string &seqValue,
-                              bool loadVarPartToCache = true);
+  bool ParseFromSeqToTwoPart(Schema *schemaPtr, Value &seqValue,
+                             bool loadVarPartToCache = true);
+
+  bool FreeTwoPartRow(Schema *schemaPtr, char *value);
 
   // combine the fixed part and variable part, and move the data into a new one
-  string ParseFromTwoPartToSeq(Schema *schemaPtr, char *rowFiexdPart,
-                               char *rowVarPart);
+  static bool ParseFromTwoPartToSeq(Schema *schemaPtr, string &seqValue,
+                                    char *rowPtr);
 
  private:
   MemPool *_globalPool = nullptr;
@@ -59,8 +68,11 @@ class SchemaParser {
 
 class ValueReader {
  public:
- ValueReader(Schema *schemaPtr) :_schemaPtr(schemaPtr){}
+  ValueReader(Schema *schemaPtr) : _schemaPtr(schemaPtr) {}
   bool ExtractFieldFromRow(char *rowPtr, uint32_t fieldId, Value &value);
+
+  bool ExtractFieldFromPmemRow(PmemAddress rowPtr, PmemEngine *enginePtr,
+                               uint32_t fieldId, Value &value);
 
  private:
   Schema *_schemaPtr = nullptr;

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <unistd.h>
+#include "logging.h"
 #ifndef TBB_PREVIEW_MEMORY_POOL
 #define TBB_PREVIEW_MEMORY_POOL 1
 #endif
@@ -33,25 +34,51 @@ class MemPool {
       : _page_size(page_size), _page_count(page_count) {
     _pool_size = page_size * page_count;
     _memory_pool_buffer = (char *)malloc(_pool_size);
-    // std::cout << "The buffer address is [ " << (uint64_t)_memory_pool_buffer
-    //   << " , " << (uint64_t)_memory_pool_buffer + _pool_size << " ]"
-    //   << std::endl;
+   
     _my_pool = new tbb::fixed_pool(_memory_pool_buffer, _pool_size);
   }
-  void *AllocatePage() { return _my_pool->malloc(_page_size); }
-  void *Malloc(uint32_t size) { return _my_pool->malloc(size); }
-  void Free(void *ptr) { _my_pool->free(ptr); }
+  void *AllocatePage() {
+    _allocate_count.fetch_add(1, std::memory_order_relaxed);
+    return _my_pool->malloc(_page_size);
+  }
+  void *Malloc(uint32_t size) {
+    _allocate_count.fetch_add(1, std::memory_order_relaxed);
+    void *ptr= _my_pool->malloc(size);
+    NKV_LOG_I(std::cout,"Allocate address: {}", (uint64_t)ptr);
+    return ptr;
+  }
+  void Free(void *ptr) {
+    _free_count.fetch_add(1, std::memory_order_relaxed);
+    NKV_LOG_I(std::cout,"Free address: {}", (uint64_t)ptr);
+    _my_pool->free(ptr);
+  }
+
   void RecyclePool() { _my_pool->recycle(); }
   ~MemPool() {
     _my_pool->recycle();
     delete _my_pool;
     free(_memory_pool_buffer);
   }
+  void OutputStatus() {
+    NKV_LOG_I(std::cout, "Allocate count: {}, Free count: {}",
+              _allocate_count.load(std::memory_order_relaxed),
+              _free_count.load(std::memory_order_relaxed));
+  }
+  uint32_t GetAllocateCount() {
+    return _allocate_count.load(std::memory_order_relaxed);
+  }
+
+  uint32_t GetFreeCount() {
+    return _free_count.load(std::memory_order_relaxed);
+  }
 
  private:
   uint32_t _page_size = 0;
   uint32_t _page_count = 0;
   uint32_t _pool_size = 0;
+  std::atomic_uint32_t _allocate_count = 0;
+  std::atomic_uint32_t _free_count = 0;
+
   char *_memory_pool_buffer = nullptr;
   tbb::fixed_pool *_my_pool = nullptr;
 };

@@ -14,15 +14,16 @@
 #include "pbrb.h"
 #include "profiler.h"
 #include "schema.h"
+#include "schema_parser.h"
 #include "timestamp.h"
 
 namespace NKV {
 
-SchemaId NeoPMKV::createSchema(vector<SchemaField> fields,
+SchemaId NeoPMKV::CreateSchema(vector<SchemaField> fields,
                                uint32_t primarykey_id, string name) {
-  Schema newSchema = _schemaAllocator.createSchema(name, primarykey_id, fields);
+  Schema newSchema = _schemaAllocator.CreateSchema(name, primarykey_id, fields);
   _sMap.addSchema(newSchema);
-  _sParser.insert({newSchema.schemaId, SchemaParser(_memPoolPtr)});
+  _sParser.insert({newSchema.schemaId, new SchemaParser(_memPoolPtr)});
   _indexerList.insert({newSchema.schemaId, std::make_shared<IndexerT>()});
   if (_enable_pbrb == true) {
     _pbrb->createCacheForSchema(newSchema.schemaId);
@@ -31,9 +32,9 @@ SchemaId NeoPMKV::createSchema(vector<SchemaField> fields,
 }
 
 bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
-                                        std::shared_ptr<IndexerT> indexer,
-                                        SchemaId schemaid, vector<Value> &value,
-                                        vector<uint32_t> &fields) {
+                                        shared_ptr<IndexerT> indexer,
+                                        SchemaId schemaid, Value &value,
+                                        uint32_t fieldId) {
   if (idxIter == indexer->end()) {
     return false;
   }
@@ -51,29 +52,35 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     POINT_PROFILE_START(_timer);
 
     bool status = _pbrb->read(oldTS, newTS, vPtr.getPBRBAddr(), schemaid, value,
-                              &vPtr, fields);
+                              &vPtr, fieldId);
     POINT_PROFILE_END(_timer);
     PROFILER_ATMOIC_ADD(_durationStat.pbrbReadCount, 1);
     PROFILER_ATMOIC_ADD(_durationStat.pbrbReadTimeNanoSecs, _timer.duration());
-
-    return true;
+    if (status == true) {
+      return true;
+    }
   }
 
   // Read PLog get a value
+  Schema *schemaPtr = _sMap.find(schemaid);
   POINT_PROFILE_START(pmem_timer);
-  _engine_ptr->read(vPtr.getPmemAddr(), value);
+  if (fieldId == UINT32_MAX) {
+    Status s = _engine_ptr->read(vPtr.getPmemAddr(), value);
+    assert(s.is2xxOK());
+  } else {
+    Status s = _engine_ptr->read(vPtr.getPmemAddr(), value, schemaPtr, fieldId);
+    assert(s.is2xxOK());
+  }
   POINT_PROFILE_END(pmem_timer);
   PROFILER_ATMOIC_ADD(_durationStat.pmemReadCount, 1);
   PROFILER_ATMOIC_ADD(_durationStat.pmemReadTimeNanoSecs,
                       pmem_timer.duration());
-
+  // disable pbrb
   if (_enable_pbrb == false) {
-    if (fields.size() != 0) {
-      auto schema = _sMap.find(schemaid);
-      auto field_offset = schema->getPBRBOffset(fields[0]);
-      auto field_size = schema->getSize(fields[0]) + FieldHeadSize;
-      value = value.substr(field_offset, field_size);
-    }
+    return true;
+  }
+  // only partial value
+  if (fieldId != UINT32_MAX) {
     return true;
   }
   TimeStamp newTs;
@@ -82,23 +89,86 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
   _pbrb->schemaMiss(schemaid);
 
   POINT_PROFILE_START(pbrb_timer);
-  bool status = _pbrb->write(oldTS, newTs, schemaid, value, idxIter);
+  if (schemaPtr->hasVariableField == true) {
+    std::string fixedValue = value;
+    auto i = _sParser[schemaid]->ParseFromSeqToTwoPart(schemaPtr, fixedValue);
+    bool status = _pbrb->write(oldTS, newTs, schemaid, fixedValue, idxIter);
+  } else {
+    bool status = _pbrb->write(oldTS, newTs, schemaid, value, idxIter);
+  }
+
   POINT_PROFILE_END(pbrb_timer);
   PROFILER_ATMOIC_ADD(_durationStat.pbrbWriteCount, 1);
   PROFILER_ATMOIC_ADD(_durationStat.pbrbWriteTimeNanoSecs,
                       pbrb_timer.duration());
-
-  if (fields.size() != 0) {
-    auto schema = _sMap.find(schemaid);
-    auto field_offset = schema->getPBRBOffset(fields[0]);
-    auto field_size = schema->getSize(fields[0]) + FieldHeadSize;
-    value = value.substr(field_offset, field_size);
-  }
   return true;
 }
 
-bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
-                              vector<uint32_t> fields) {
+bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
+                                        shared_ptr<IndexerT> indexer,
+                                        SchemaId schemaid,
+                                        vector<Value> &values,
+                                        vector<uint32_t> &fields) {
+  if (idxIter == indexer->end()) {
+    return false;
+  }
+  ValuePtr &vPtr = idxIter->second;
+  auto [hotStatus, oldTS] = vPtr.getHotStatus();
+
+  // read from pbrb
+  if (hotStatus == true) {
+    NKV_LOG_D(std::cout, "Read value from PBRB");
+    _pbrb->schemaHit(schemaid);
+    // Read PBRB
+    TimeStamp newTS;
+    newTS.getNow();
+
+    POINT_PROFILE_START(_timer);
+
+    bool status = _pbrb->read(oldTS, newTS, vPtr.getPBRBAddr(), schemaid,
+                              values, &vPtr, fields);
+    POINT_PROFILE_END(_timer);
+    PROFILER_ATMOIC_ADD(_durationStat.pbrbReadCount, 1);
+    PROFILER_ATMOIC_ADD(_durationStat.pbrbReadTimeNanoSecs, _timer.duration());
+
+    return true;
+  }
+  Schema *schemaPtr = _sMap.find(schemaid);
+  // Read PLog get a value
+  POINT_PROFILE_START(pmem_timer);
+  Value allValue;
+  _engine_ptr->read(vPtr.getPmemAddr(), allValue);
+  POINT_PROFILE_END(pmem_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemReadCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.pmemReadTimeNanoSecs,
+                      pmem_timer.duration());
+  ValueReader valueReader(schemaPtr);
+  for (uint32_t i = 0; i < fields.size(); i++)
+    valueReader.ExtractFieldFromRow(allValue.data(), fields[i], values[i]);
+
+  if (_enable_pbrb == false) {
+    return true;
+  }
+  TimeStamp newTs;
+  newTs.getNow();
+
+  _pbrb->schemaMiss(schemaid);
+
+  POINT_PROFILE_START(pbrb_timer);
+  if (schemaPtr->hasVariableField == true) {
+    _sParser[schemaid]->ParseFromSeqToTwoPart(schemaPtr, allValue);
+    bool status = _pbrb->write(oldTS, newTs, schemaid, allValue, idxIter);
+  } else {
+    bool status = _pbrb->write(oldTS, newTs, schemaid, allValue, idxIter);
+  }
+  POINT_PROFILE_END(pbrb_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.pbrbWriteCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.pbrbWriteTimeNanoSecs,
+                      pbrb_timer.duration());
+  return true;
+}
+
+bool NeoPMKV::Get(Key &key, Value &value) {
   POINT_PROFILE_START(overall_timer);
   auto indexer = _indexerList[key.schemaId];
 
@@ -108,7 +178,72 @@ bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
 
   POINT_PROFILE_END(index_timer);
   PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
-  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs, index_timer.duration());
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
+                      index_timer.duration());
+
+  // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
+  //           idxIter->second);
+  POINT_PROFILE_START(get_timer);
+  bool status =
+      getValueFromIndexIterator(idxIter, indexer, key.schemaId, value);
+
+  POINT_PROFILE_END(get_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorTimeNanoSecs,
+                      get_timer.duration());
+
+  POINT_PROFILE_END(overall_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.GetInterfaceCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.GetInterfaceTimeNanoSecs,
+                      overall_timer.duration());
+  return status;
+}
+
+bool NeoPMKV::PartialGet(Key &key, Value &value, uint32_t field) {
+  POINT_PROFILE_START(overall_timer);
+  auto indexer = _indexerList[key.schemaId];
+
+  POINT_PROFILE_START(index_timer);
+
+  IndexerIterator idxIter = indexer->find(key.primaryKey);
+
+  POINT_PROFILE_END(index_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
+                      index_timer.duration());
+
+  // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
+  //           idxIter->second);
+  POINT_PROFILE_START(get_timer);
+  bool status =
+      getValueFromIndexIterator(idxIter, indexer, key.schemaId, value, field);
+
+  POINT_PROFILE_END(get_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorTimeNanoSecs,
+                      get_timer.duration());
+
+  POINT_PROFILE_END(overall_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.GetInterfaceCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.GetInterfaceTimeNanoSecs,
+                      overall_timer.duration());
+  return status;
+}
+
+bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
+                              vector<uint32_t> fields) {
+  value.resize(fields.size());
+  POINT_PROFILE_START(overall_timer);
+  auto indexer = _indexerList[key.schemaId];
+
+  POINT_PROFILE_START(index_timer);
+
+  IndexerIterator idxIter = indexer->find(key.primaryKey);
+
+  POINT_PROFILE_END(index_timer);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
+                      index_timer.duration());
 
   // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
   //           idxIter->second);
@@ -128,7 +263,14 @@ bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
   return status;
 }
 
-bool NeoPMKV::Put(Key &key, const string &value) {
+bool NeoPMKV::Put(const Key &key, vector<Value> &fieldList) {
+  Schema *schemaPtr = _sMap.find(key.schemaId);
+  std::string value =
+      _sParser[key.schemaId]->ParseFromUserWriteToSeq(schemaPtr, fieldList);
+  return Put(key, value);
+}
+
+bool NeoPMKV::Put(const Key &key, const Value &value) {
   auto indexer = _indexerList[key.schemaId];
 
   PmemAddress pmAddr;
@@ -159,13 +301,14 @@ bool NeoPMKV::Put(Key &key, const string &value) {
   if (status == true) return true;
   // status is false means having the old kv
   if (_enable_pbrb == true && iter->second.isHot() == true) {
-    _pbrb->dropRow(iter->second.getPBRBAddr());
+    _pbrb->dropRow(iter->second.getPBRBAddr(), _sMap.find(key.schemaId));
   }
   iter->second.setColdPmemAddr(pmAddr, putTs);
 
   return true;
 }
-bool NeoPMKV::Update(Key &key, vector<pair<string, string>> &values) {
+
+bool NeoPMKV::PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId) {
   auto indexer = _indexerList[key.schemaId];
 
   POINT_PROFILE_START(index_timer);
@@ -183,11 +326,10 @@ bool NeoPMKV::Update(Key &key, vector<pair<string, string>> &values) {
   updatetTs.getNow();
 
   POINT_PROFILE_START(pmem_timer);
-  for (const auto &[fieldName, fieldContent] : values) {
-    uint32_t fieldOffset = _sMap.find(key.schemaId)->getPmemOffset(fieldName);
-    _engine_ptr->write(pmemAddr + fieldOffset, fieldContent.c_str(),
-                       fieldContent.size());
-  }
+  uint32_t fieldOffset = _sMap.find(key.schemaId)->getPmemOffset(fieldId);
+  _engine_ptr->write(pmemAddr + fieldOffset, fieldValue.c_str(),
+                     fieldValue.size());
+
   POINT_PROFILE_END(pmem_timer);
   PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateCount, 1);
   PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateTimeNanoSecs,
@@ -196,9 +338,10 @@ bool NeoPMKV::Update(Key &key, vector<pair<string, string>> &values) {
   vPtr.setColdPmemAddr(pmemAddr, updatetTs);
   return true;
 }
-bool NeoPMKV::PartialUpdate(Key &key, pair<uint32_t, Value> &fiedldValue) {}
-bool NeoPMKV::MultiPartialUpdate(Key &key,
-                                 vector<pair<uint32_t, Value>> &values) {
+
+bool NeoPMKV::MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
+                                 vector<uint32_t> &fields) {
+  assert(fields.size() == fieldValues.size());
   auto indexer = _indexerList[key.schemaId];
 
   POINT_PROFILE_START(index_timer);
@@ -216,7 +359,9 @@ bool NeoPMKV::MultiPartialUpdate(Key &key,
   updatetTs.getNow();
 
   POINT_PROFILE_START(pmem_timer);
-  for (const auto &[fieldId, fieldContent] : values) {
+  for (uint32_t i = 0; i < fields.size(); i++) {
+    uint32_t fieldId = fields[i];
+    Value &fieldContent = fieldValues[i];
     uint32_t fieldOffset = _sMap.find(key.schemaId)->getPmemOffset(fieldId);
     _engine_ptr->write(pmemAddr + fieldOffset, fieldContent.c_str(),
                        fieldContent.size());
@@ -230,6 +375,7 @@ bool NeoPMKV::MultiPartialUpdate(Key &key,
   vPtr.setColdPmemAddr(pmemAddr, updatetTs);
   return true;
 }
+
 bool NeoPMKV::Remove(Key &key) {
   auto indexer = _indexerList[key.schemaId];
 
@@ -239,12 +385,39 @@ bool NeoPMKV::Remove(Key &key) {
   }
   bool isHot = idxIter->second.isHot();
   if (isHot) {
-    _pbrb->dropRow(idxIter->second.getPBRBAddr());
+    _pbrb->dropRow(idxIter->second.getPBRBAddr(), _sMap.find(key.schemaId));
   }
   indexer->unsafe_erase(idxIter);
   return true;
 }
-bool NeoPMKV::Scan(Key &start, vector<Value> &value_list, uint32_t scan_len) {}
+
+bool NeoPMKV::Scan(Key &start, vector<Value> &value_list, uint32_t scan_len) {
+  auto indexer = _indexerList[start.schemaId];
+
+  POINT_PROFILE_START(index_timer);
+
+  auto iter = indexer->upper_bound(start.primaryKey);
+
+  POINT_PROFILE_END(index_timer);
+
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
+  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
+                      index_timer.duration());
+
+  POINT_PROFILE_START(get_value);
+
+  for (auto i = 0; i < scan_len && iter != indexer->end(); i++, iter++) {
+    string tmp_value;
+    getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value);
+    value_list.push_back(tmp_value);
+  }
+  POINT_PROFILE_END(get_value);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorCount, scan_len);
+  PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorTimeNanoSecs,
+                      get_value.duration());
+  return true;
+}
+
 bool NeoPMKV::PartialScan(Key &start, vector<Value> &value_list,
                           uint32_t scan_len, uint32_t field) {
   auto indexer = _indexerList[start.schemaId];
@@ -263,7 +436,7 @@ bool NeoPMKV::PartialScan(Key &start, vector<Value> &value_list,
 
   for (auto i = 0; i < scan_len && iter != indexer->end(); i++, iter++) {
     string tmp_value;
-    getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value, fields);
+    getValueFromIndexIterator(iter, indexer, start.schemaId, tmp_value, field);
     value_list.push_back(tmp_value);
   }
   POINT_PROFILE_END(get_value);

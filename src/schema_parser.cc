@@ -30,21 +30,20 @@ namespace NKV {
 std::string SchemaParser::ParseFromUserWriteToSeq(
     Schema *schemaPtr, std::vector<Value> &fieldValues) {
   std::string result;
-  uint32_t seqRowSize = 0;     // record the row size
-  uint32_t fixedPartSize = 0;  // record the fixed part size
-  for (uint32_t i = 0; i < fieldValues.size(); i++) {
+  uint32_t fixedPartSize =
+      schemaPtr->getAllFixedFieldSize();  // record the fixed part size
+  uint32_t seqRowSize = fixedPartSize;    // record the row size
+  uint32_t userWriteCount = fieldValues.size();
+  for (uint32_t i = 0; i < userWriteCount; i++) {
     // add the fixed part
-    seqRowSize += schemaPtr->fieldsMeta[i].fieldSize;
-    fixedPartSize += schemaPtr->fieldsMeta[i].fieldSize;
     if (schemaPtr->fieldsMeta[i].isVariable == false) {
       continue;
     }
     uint32_t varFieldSize = fieldValues[i].size();
-    if (varFieldSize <= sizeof(VarFieldContent::contentData)) {
-      continue;
+    if (varFieldSize > sizeof(VarFieldContent::contentData)) {
+      seqRowSize += varFieldSize;
     }
     // add the variable part
-    seqRowSize += varFieldSize;
   }
   result.resize(seqRowSize + sizeof(uint32_t));
 
@@ -56,13 +55,13 @@ std::string SchemaParser::ParseFromUserWriteToSeq(
   uint32_t total_size = 0;
   char *varDestPtr = startPtr + fixedPartSize;
 
-  for (uint32_t i = 0; i < fieldValues.size(); i++) {
-    uint32_t size = schemaPtr->fieldsMeta[i].fieldSize;
+  for (uint32_t i = 0; i < userWriteCount; i++) {
+    uint32_t fieldSize = schemaPtr->fieldsMeta[i].fieldSize;
     const char *src_ptr = fieldValues[i].c_str();
     // not variable field
     if (schemaPtr->fieldsMeta[i].isVariable == false) {
       memcpy(destPtr, src_ptr, fieldValues[i].size());
-      destPtr += size;
+      destPtr += fieldSize;
       continue;
     }
     // is variable field, only need to construct the fiexed part
@@ -83,81 +82,129 @@ std::string SchemaParser::ParseFromUserWriteToSeq(
   return result;
 }
 
-char *SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
-                                          std::string &seqValue,
-                                          bool loadVarPartToCache) {
+bool SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
+                                         std::string &seqValue,
+                                         bool loadVarPartToCache) {
   uint32_t rowFixedPartSize = schemaPtr->getSize();
   uint32_t rowVarPartSize = seqValue.size() - rowFixedPartSize;
 
   char *fieldPtr = seqValue.data() + sizeof(uint32_t);
-  if (rowVarPartSize == 0) {
+  if (schemaPtr->hasVariableField == false) {
     seqValue.resize(rowFixedPartSize);
-    return nullptr;
+    return true;
   }
   if (loadVarPartToCache == false) {
     for (auto &i : schemaPtr->fieldsMeta) {
-      if (i.isVariable == true) {
-        EncodeToVarFieldNotCache(fieldPtr);
-      }
+      if (i.isVariable == true) EncodeToVarFieldNotCache(fieldPtr);
       fieldPtr += i.fieldSize;
     }
-    return nullptr;
+    return true;
   }
 
   // copy the varbaile field content
+  bool noSpace = false;
   char *rowVarPartPtr = seqValue.data() + rowFixedPartSize;
-  char *varSpacePtr = (char *)_globalPool->Malloc(rowVarPartSize);
-  memcpy(varSpacePtr, rowVarPartPtr, rowVarPartSize);
-
-  char *varContentPtr = varSpacePtr;
   for (auto &i : schemaPtr->fieldsMeta) {
-    if (i.isVariable == true) {
-      uint32_t varFieldSize = GetVarFieldSize(fieldPtr);
-      // must be pointer or offset
-      if (varFieldSize > 8) {
-        EncodeToVarFieldOnlyPointer(fieldPtr, varContentPtr, varFieldSize);
-        varContentPtr += varFieldSize;
-      }
-    }
-    fieldPtr += i.fieldSize;
-  }
-  seqValue.resize(rowFixedPartSize);
-  return varSpacePtr;
-}
-
-std::string SchemaParser::ParseFromTwoPartToSeq(Schema *schemaPtr,
-                                                char *rowFiexdPart,
-                                                char *rowVarPart) {
-  std::string res;
-  uint32_t rowFixedPartSize = schemaPtr->getSize();
-  assert(rowVarPart != nullptr);
-
-  uint32_t rowVarPartSize =
-      *(uint32_t *)rowFiexdPart - schemaPtr->getAllFixedFieldSize();
-  res.resize(rowFixedPartSize + rowVarPartSize);
-  memcpy(res.data(), rowFiexdPart, rowFixedPartSize);
-  memcpy(res.data() + rowFixedPartSize, rowVarPart, rowVarPartSize);
-  rowVarPart = res.data() + rowFixedPartSize;
-
-  char *fieldPtr = rowFiexdPart + sizeof(uint32_t);
-
-  for (auto &i : schemaPtr->fieldsMeta) {
+    // not variable field, do nothing
     if (i.isVariable == false) {
       fieldPtr += i.fieldSize;
       continue;
     }
-    VarFieldContent *varFieldPtr =
-        reinterpret_cast<VarFieldContent *>(fieldPtr);
-    if (varFieldPtr->contentType == VarFieldType::ONLY_PONTER) {
-      varFieldPtr->contentPtr = rowVarPart;
-      rowVarPart += varFieldPtr->contentSize;
+    // meet variable field
+    uint32_t varFieldSize = GetVarFieldSize(fieldPtr);
+    // data is in the field, no need to move
+    if (varFieldSize <= 8) {
+      fieldPtr += i.fieldSize;
+      continue;
+    }
+    // there is no space for movement
+    if (noSpace == true) {
+      EncodeToVarFieldNotCache(fieldPtr);
+      fieldPtr += i.fieldOffset;
+      continue;
     }
 
+    // let's start to move
+    try {
+      void *varSpacePtr = _globalPool->Malloc(varFieldSize);
+      memcpy(varSpacePtr, rowVarPartPtr, varFieldSize);
+      EncodeToVarFieldOnlyPointer(fieldPtr, varSpacePtr, varFieldSize);
+    } catch (std::bad_alloc &ba) {
+      noSpace = true;
+      EncodeToVarFieldNotCache(fieldPtr);
+    }
     fieldPtr += i.fieldSize;
   }
-
-  return res;
+  seqValue.resize(rowFixedPartSize);
+  if (noSpace == true) return false;
+  return true;
 }
+
+bool SchemaParser::FreeTwoPartRow(Schema *schemaPtr, char *value) {
+  if (schemaPtr->hasVariableField == false) return true;
+  uint32_t rowFixedPartSize = schemaPtr->getSize();
+  char *fieldPtr = value + sizeof(uint32_t);
+  for (auto &i : schemaPtr->fieldsMeta) {
+    if (i.isVariable == true) {
+      VarFieldContent *varFieldPtr =
+          reinterpret_cast<VarFieldContent *>(fieldPtr);
+      if (varFieldPtr->contentType == VarFieldType::ONLY_PONTER) {
+        _globalPool->Free(varFieldPtr->contentPtr);
+      }
+    }
+    fieldPtr += i.fieldSize;
+  }
+  return true;
+}
+bool SchemaParser::ParseFromTwoPartToSeq(Schema *schemaPtr, string &newValue,
+                                         char *oldPtr) {
+  uint32_t rowFixedPartSize = schemaPtr->getSize();
+  assert(oldPtr != nullptr);
+
+  uint32_t rowVarPartSize =
+      *(uint32_t *)oldPtr - schemaPtr->getAllFixedFieldSize();
+
+  newValue.resize(rowFixedPartSize + rowVarPartSize);
+  // copy the fixed size part
+  memcpy(newValue.data(), oldPtr, rowFixedPartSize);
+
+  if (rowVarPartSize == 0) {
+    return true;
+  }
+  char *rowVarPart = newValue.data() + rowFixedPartSize;
+
+  char *newFieldPtr = newValue.data() + sizeof(uint32_t);
+
+  for (auto &i : schemaPtr->fieldsMeta) {
+    if (i.isVariable == false) {
+      newFieldPtr += i.fieldSize;
+      continue;
+    }
+    VarFieldContent *varFieldPtr =
+        reinterpret_cast<VarFieldContent *>(newFieldPtr);
+    if (varFieldPtr->contentType == VarFieldType::ONLY_PONTER) {
+      // copy the variable field into the row
+      memcpy(rowVarPart, varFieldPtr->contentPtr, varFieldPtr->contentSize);
+      varFieldPtr->contentOffset = rowVarPart - newFieldPtr;
+      varFieldPtr->contentType = VarFieldType::ROW_OFFSET;
+      rowVarPart += varFieldPtr->contentSize;
+    }
+    if (varFieldPtr->contentType == VarFieldType::NOT_CACHE) {
+      return false;
+    }
+    newFieldPtr += i.fieldSize;
+  }
+
+  return true;
+}
+
+bool ValueReader::ExtractFieldFromPmemRow(PmemAddress rowPtr,
+                                          PmemEngine *enginePtr,
+                                          uint32_t fieldId, Value &value) {
+  const Status s = enginePtr->read(rowPtr, value, _schemaPtr, fieldId);
+  return s.is2xxOK();
+}
+
 bool ValueReader::ExtractFieldFromRow(char *rowPtr, uint32_t fieldId,
                                       Value &value) {
   // decide if it is variable
@@ -183,7 +230,8 @@ bool ValueReader::ExtractFieldFromRow(char *rowPtr, uint32_t fieldId,
   // store the value in seq row
   if (fieldType == VarFieldType::ROW_OFFSET) {
     value.resize(fieldSize, 0);
-    memcpy(value.data(), (char*)varFieldPtr + varFieldPtr->contentOffset, fieldSize);
+    memcpy(value.data(), (char *)varFieldPtr + varFieldPtr->contentOffset,
+           fieldSize);
     return true;
   }
   // store the value in the heap space
@@ -198,6 +246,5 @@ bool ValueReader::ExtractFieldFromRow(char *rowPtr, uint32_t fieldId,
   // NOT in Cache
   return false;
 }
-
 
 }  // namespace NKV

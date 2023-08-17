@@ -24,9 +24,10 @@
 namespace NKV {
 
 using std::pair;
+using std::shared_ptr;
 using std::string;
 using std::vector;
-using SchemaParserMap = std::unordered_map<SchemaId, SchemaParser>;
+using SchemaParserMap = std::unordered_map<SchemaId, SchemaParser *>;
 
 class NeoPMKV {
  public:
@@ -52,12 +53,14 @@ class NeoPMKV {
       TimeStamp ts_start_pbrb;
       ts_start_pbrb.getNow();
       _pbrb = new PBRB(max_page_num, &ts_start_pbrb, &_indexerList, &_sMap,
-                       rw_mirco, 4, async_pbrb, enable_async_gc, gc_threshold,
-                       gc_inteval_micro, hit_threshold);
+                       &_sParser, _engine_ptr, rw_mirco, 4, async_pbrb,
+                       enable_async_gc, gc_threshold, gc_inteval_micro,
+                       hit_threshold);
     }
   }
   ~NeoPMKV() {
     delete _memPoolPtr;
+    for (const auto &[_, schemaParser] : _sParser) delete schemaParser;
     delete _engine_ptr;
     if (_enable_pbrb) {
       delete _pbrb;
@@ -65,30 +68,37 @@ class NeoPMKV {
     outputReadStat();
   }
 
-  SchemaId createSchema(vector<SchemaField> fields, uint32_t primarykeyId,
+  SchemaId CreateSchema(vector<SchemaField> fields, uint32_t primarykeyId,
                         string name);
   bool MultiPartialGet(Key &key, vector<Value> &value,
                        const vector<uint32_t> fields);
   bool PartialGet(Key &key, Value &value, uint32_t field);
   bool Get(Key &key, Value &value);
 
-  bool Put(Key &key, vector<Value> fieldList);
-  bool Put(Key &key, const Value &value);
+  bool Put(const Key &key, vector<Value> &fieldList);
+  bool Put(const Key &key, const Value &value);
 
-  bool PartialUpdate(Key &key, pair<uint32_t, string> &values);
-  bool MultiPartialUpdate(Key &key, vector<pair<uint32_t, string>> &values);
+  bool PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId);
+  bool MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
+                          vector<uint32_t> &fields);
 
   bool Remove(Key &key);
-  bool Scan(Key &start, vector<Value> &valueList, uint32_t scanLen);
+
   bool PartialScan(Key &start, vector<Value> &valueList, uint32_t scanLen,
                    uint32_t fieldId);
+  bool Scan(Key &start, vector<Value> &valueList, uint32_t scanLen);
 
   void outputReadStat();
+
  private:
   bool getValueFromIndexIterator(IndexerIterator &idxIter,
-                                 std::shared_ptr<IndexerT> indexer,
+                                 shared_ptr<IndexerT> indexer,
                                  SchemaId schemaid, vector<Value> &value,
                                  vector<uint32_t> &fields);
+  bool getValueFromIndexIterator(IndexerIterator &idxIter,
+                                 shared_ptr<IndexerT> indexer,
+                                 SchemaId schemaid, Value &value,
+                                 uint32_t fieldId = UINT32_MAX);
   // use store the key -> valueptr
   IndexerList _indexerList;
   // use to allocate schema
@@ -97,6 +107,7 @@ class NeoPMKV {
   SchemaUMap _sMap;
   // schema parser list
   SchemaParserMap _sParser;
+
   MemPool *_memPoolPtr = nullptr;
 
   // pbrb part
@@ -138,7 +149,6 @@ class NeoPMKV {
     std::atomic<uint64_t> pbrbWriteCount = {0};
     std::atomic<uint64_t> pbrbWriteTimeNanoSecs = {0};
   } _durationStat;
-
 };
 
 }  // namespace NKV

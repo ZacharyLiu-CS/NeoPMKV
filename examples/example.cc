@@ -33,22 +33,23 @@ int main() {
   std::vector<NKV::SchemaField> fields{
       NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
       NKV::SchemaField(NKV::FieldType::STRING, "f2", 16)};
-  auto schemaid = neopmkv->createSchema(fields, 0, "test");
+  auto schemaid = neopmkv->CreateSchema(fields, 0, "test");
   NKV::Key key1{schemaid, 1};
-  std::string value1 = "1dsadadasdad1";
-  NKV_LOG_I(std::cout, "value: {}", value1);
+  std::vector<NKV::Value> value1 = {"14", "1dsadadasdad1"};
+  NKV_LOG_I(std::cout, "value1 [0]:{} [1]:{}", value1[0], value1[1]);
   NKV::Key key2{schemaid, 2};
-  std::string value2 = "22-09kjlksjdlajlsd";
-  NKV_LOG_I(std::cout, "value: {}", value2);
-  neopmkv->put(key1, value1);
-  neopmkv->put(key2, value2);
+  
+  std::vector<NKV::Value> value2 = {"15", "22-09kjlksjdlajlsd"};
+  NKV_LOG_I(std::cout, "value2 [0]:{} [1]:{}", value2[0], value2[1]);
+  neopmkv->Put(key1, value1);
+  neopmkv->Put(key2, value2);
 
   std::string read_value = "";
   read_value.clear();
-  neopmkv->get(key1, read_value);
+  neopmkv->Get(key1, read_value);
   NKV_LOG_I(std::cout, "value: {}", read_value);
   read_value.clear();
-  neopmkv->get(key2, read_value);
+  neopmkv->Get(key2, read_value);
   NKV_LOG_I(std::cout, "value: {}", read_value);
   delete neopmkv;
   res = system(clean_cmd.c_str());

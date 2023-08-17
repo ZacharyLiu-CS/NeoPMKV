@@ -119,8 +119,9 @@ Status PmemLog::read(PmemAddress readAddr, std::string &value) {
   uint32_t read_size = 0;
   _read((char *)&read_size, readAddr, sizeof(uint32_t));
 
-  value.resize(read_size);
-  _read(value.data(), readAddr + sizeof(uint32_t), read_size);
+  value.resize(read_size + sizeof(uint32_t));
+  *(uint32_t *)value.data() = read_size;
+  _read(value.data()+4, readAddr + sizeof(uint32_t), read_size);
   return PmemStatuses::S200_OK_Found;
 }
 Status PmemLog::read(PmemAddress readAddr, std::string &value,

@@ -65,7 +65,7 @@ class PmemLog : public PmemEngine {
  private:
   // private _append function to write srcdata to plog
   inline PmemAddress _append(char *srcdata, size_t len) {
-    constexpr uint32_t head_size = sizeof(uint32_t);
+    constexpr uint32_t head_size = 0;
     uint64_t now_tail_offset = _tail_offset.fetch_add(len + head_size);
     if ((1 + _active_chunk_id.load()) * _plog_meta.chunk_size <
         now_tail_offset + len + head_size) {
@@ -82,7 +82,7 @@ class PmemLog : public PmemEngine {
               "Append data: len=>{} to offset=>{}, activate chunk id=>{}", len,
               now_tail_offset, _active_chunk_id.load());
 
-    *(uint32_t *)pmem_addr = len;
+    // *(uint32_t *)pmem_addr = len;
     if (_is_pmem) {
       _copyToPmem(pmem_addr + head_size, srcdata, len);
     } else {
@@ -96,7 +96,7 @@ class PmemLog : public PmemEngine {
     uint32_t chunk_id = src / _plog_meta.chunk_size;
     char *pmem_addr =
         _chunk_list[chunk_id].pmem_addr + src % _plog_meta.chunk_size;
-    NKV_LOG_D(std::cout, "Convert from: {} => {}", src, pmem_addr);
+    NKV_LOG_D(std::cout, "Convert from: {} => {}", src, (uint64_t)pmem_addr);
     return pmem_addr;
   }
   // private _read function to read data from given offset and length
@@ -113,11 +113,10 @@ class PmemLog : public PmemEngine {
     uint32_t chunk_id = dst / _plog_meta.chunk_size;
     char *pmem_addr =
         _chunk_list[chunk_id].pmem_addr + dst % _plog_meta.chunk_size;
-    uint32_t head_size = sizeof(uint32_t);
     if (_is_pmem) {
-      _copyToPmem(pmem_addr + head_size, src, len);
+      _copyToPmem(pmem_addr, src, len);
     } else {
-      _copyToNonPmem(pmem_addr + head_size, src, len);
+      _copyToNonPmem(pmem_addr, src, len);
     }
   }
 

@@ -8,22 +8,26 @@
 
 #include "pbrb.h"
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <thread>
 #include "logging.h"
 #include "profiler.h"
+#include "schema_parser.h"
 
 namespace NKV {
 PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-           SchemaUMap *umap, uint64_t retentionWindowMicrosecs,
-           uint32_t maxPageSearchNum, bool async_pbrb, bool enable_async_gc,
-           double targetOccupancyRatio, uint64_t gcIntervalMicrosecs,
-           double hitThreshold) {
+           SchemaUMap *umap, SchemaParserMap *sParser, PmemEngine *enginePtr,
+           uint64_t retentionWindowMicrosecs, uint32_t maxPageSearchNum,
+           bool async_pbrb, bool enable_async_gc, double targetOccupancyRatio,
+           uint64_t gcIntervalMicrosecs, double hitThreshold) {
   static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
   // initialization
 
   _watermark = *wm;
   _schemaUMap = umap;
+  _sParser = sParser;
+  _enginePtr = enginePtr;
   _maxPageNumber = maxPageNumber;
   _indexListPtr = indexerListPtr;
   _maxPageSearchingNum = maxPageSearchNum;
@@ -98,10 +102,12 @@ BufferPage *PBRB::createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
   NKV_LOG_I(
       std::cout,
       "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList "
-      "size:{}, pageSize: {}, blbs->rowSize: {}, _bufferMap[{}].rowSize: {}, "
+      "size:{}, pageSize: {}, blbs->rowSize:{}, contentSize: {}, "
+      "_bufferMap[{}].rowSize: {}, "
       "maxRowCnt: {}",
       schemaId, pagePtr == nullptr, _freePageList.size(), sizeof(BufferPage),
-      blbs->rowSize, schemaId, blbs->rowSize, blbs->maxRowCnt);
+      blbs->rowSize, _schemaUMap->find(schemaId)->getSize(), schemaId,
+      blbs->rowSize, blbs->maxRowCnt);
 
   // Initialize Page.
   // memset(pagePtr, 0, sizeof(BufferPage));
@@ -250,7 +256,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId,
 }
 
 // return pagePtr and rowOffset.
-std::pair<BufferPage *, RowOffset> PBRB::findPageAndRowByAddr(void *rowAddr) {
+std::pair<BufferPage *, RowOffset> PBRB::findPageAndRowByAddr(RowAddr rowAddr) {
   BufferPage *pagePtr = getPageAddr(rowAddr);
   uint32_t offset = (uint64_t)rowAddr & mask;
   SchemaId sid = pagePtr->getSchemaIDPage();
@@ -414,35 +420,61 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
 
   return result;
 }
-
-// Extern interfaces:
-
 bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
                 SchemaId schemaid, Value &value, ValuePtr *vPtr,
-                std::vector<uint32_t> fields) {
+                uint32_t fieldId) {
   BufferPage *pagePtr = getPageAddr(addr);
   auto &blbs = _bufferMap[schemaid];
   if (vPtr->setHotTimeStamp(oldTS, newTS) == false) {
     return false;
   }
   pagePtr->setTimestampRow(addr, newTS);
-  if (fields.size() == 0) {
-    pagePtr->getValueRow(addr, blbs->valueSize, value);
-  } else {
-    auto schema = _schemaUMap->find(schemaid);
-    std::vector<std::pair<uint32_t, uint32_t>> value_fields;
-    uint32_t value_size = 0;
-    for (auto field_id : fields) {
-      uint32_t field_offset = schema->getPBRBOffset(field_id);
-      uint32_t field_size = schema->getSize(field_id);
-      value_fields.push_back({field_offset, field_size});
-      value_size += field_size + FieldHeadSize;
-    }
-    pagePtr->getValueRow(addr, value_size, value, value_fields);
+  Schema *schema = _schemaUMap->find(schemaid);
+  char *valuePtr = pagePtr->getValuePtr(addr);
+
+  if (fieldId == UINT32_MAX) {
+    return SchemaParser::ParseFromTwoPartToSeq(schema, value, valuePtr);
+  }
+
+  ValueReader fieldReader(schema);
+  bool s = fieldReader.ExtractFieldFromRow(valuePtr, fieldId, value);
+  if (s == false) {
+    fieldReader.ExtractFieldFromPmemRow(pagePtr->getPlogAddrRow(addr),
+                                        _enginePtr, fieldId, value);
   }
   NKV_LOG_D(std::cout,
             "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
             oldTS, value, value.size());
+  return true;
+}
+// Extern interfaces:
+
+bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
+                SchemaId schemaid, vector<Value> &values, ValuePtr *vPtr,
+                vector<uint32_t> fields) {
+  BufferPage *pagePtr = getPageAddr(addr);
+  auto &blbs = _bufferMap[schemaid];
+  if (vPtr->setHotTimeStamp(oldTS, newTS) == false) {
+    return false;
+  }
+  pagePtr->setTimestampRow(addr, newTS);
+
+  Schema *schema = _schemaUMap->find(schemaid);
+  char *valuePtr = pagePtr->getValuePtr(addr);
+  ValueReader fieldReader(schema);
+  for (uint32_t i = 0; i < fields.size(); i++) {
+    bool s = fieldReader.ExtractFieldFromRow(valuePtr, fields[i], values[i]);
+    if (s == false) {
+      fieldReader.ExtractFieldFromPmemRow(pagePtr->getPlogAddrRow(addr),
+                                          _enginePtr, fields[i], values[i]);
+    }
+  }
+  NKV_LOG_D(std::cout,
+            "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
+            oldTS, valuePtr, values.size());
+  NKV_LOG_D(std::cout,
+            "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",
+            oldTS, valuePtr, values.size());
   return true;
 }
 bool PBRB::write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
@@ -553,8 +585,13 @@ void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
     // std::this_thread::yield();
   }
 }
-bool PBRB::dropRow(RowAddr rAddr) {
+bool PBRB::dropRow(RowAddr rAddr, Schema *schemaPtr) {
   auto [pagePtr, rowOffset] = findPageAndRowByAddr(rAddr);
+  if (schemaPtr->hasVariableField == true) {
+    SchemaParser *parser = _sParser->operator[](1);
+    parser->FreeTwoPartRow(schemaPtr, pagePtr->getValuePtr(rAddr));
+  }
+
   bool result = pagePtr->clearRowBitMapPage(rowOffset);
   if (result == true) {
     auto &blbs = _bufferMap.at(pagePtr->getSchemaIDPage());
@@ -566,10 +603,10 @@ bool PBRB::dropRow(RowAddr rAddr) {
   return false;
 }
 
-bool PBRB::evictRow(IndexerIterator &iter) {
+bool PBRB::evictRow(IndexerIterator &iter, Schema *schemaPtr) {
   RowAddr rAddr = iter->second.getPBRBAddr();
   iter->second.evictToCold();
-  if (dropRow(rAddr) == false) return false;
+  if (dropRow(rAddr, schemaPtr) == false) return false;
   _evictCnt++;
   return true;
 }
@@ -632,7 +669,7 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
             schemaid, startTS, watermark, _retentionWindowMicrosecs);
   NKV_LOG_I(std::cout, "Occupancy Ratio: {:.4f}, real moved nanoSecs:{:12d}",
             occupancyRatio, moveNanoSecs);
-
+  Schema *schemaPtr = _schemaUMap->find(schemaid);
   // Traversal
   uint64_t evictCnt = 0;
   auto &idx = _indexListPtr->at(schemaid);
@@ -642,7 +679,7 @@ bool PBRB::_traverseIdxGCBySchema(SchemaId schemaid) {
     ValuePtr &valuePtr = iter->second;
     if (valuePtr.isHot() == false || valuePtr.getTimestamp().gt(watermark))
       continue;
-    if (evictRow(iter)) {
+    if (evictRow(iter, schemaPtr)) {
       evictCnt++;
       if (_checkOccupancyRatio(_targetOccupancyRatio)) {
         achieveTarget = true;
@@ -682,5 +719,43 @@ void PBRB::_stopGC() {
   _GCResult.wait();
   if (_GCResult.get() == true)
     NKV_LOG_I(std::cout, "Successfully stopped _asyncGC.");
+}
+
+bool PBRB::schemaHit(SchemaId sid) {
+  auto &accStat = _AccStatBySchema[sid];
+  if (accStat.hit())
+    ;  // traverseIdxGC();
+  return true;
+}
+bool PBRB::schemaMiss(SchemaId sid) {
+  auto &accStat = _AccStatBySchema[sid];
+  if (accStat.miss())
+    ;  // traverseIdxGC();
+  return true;
+}
+double PBRB::getHitRatio(SchemaId sid) {
+  auto it = _AccStatBySchema.find(sid);
+  if (it == _AccStatBySchema.end()) return -1;
+  return (double)(it->second.hitCount) / it->second.accessCount;
+}
+
+void PBRB::outputHitRatios() {
+  for (auto &it : _AccStatBySchema) {
+    auto &hitVec = it.second.hitVec;
+    NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratio: {} / {} = {:.2f}",
+              it.first, it.second.hitCount, it.second.accessCount,
+              (double)it.second.hitCount / it.second.accessCount);
+    std::string hitStr, ratioStr;
+    std::for_each(hitVec.begin(), hitVec.end(), [&](uint64_t x) {
+      fmt::format_to(std::back_inserter(hitStr), "{:8d} ", x);
+      fmt::format_to(std::back_inserter(ratioStr), "{:8.3f} ",
+                     (double)x / it.second.interval);
+    });
+
+    NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
+              it.first, it.second.interval, hitStr);
+    NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
+              it.first, it.second.interval, ratioStr);
+  }
 }
 }  // namespace NKV

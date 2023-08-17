@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <future>
@@ -43,17 +44,25 @@
 
 namespace NKV {
 
+class SchemaParser;
+
+using std::string;
+using std::vector;
+
 const uint32_t rowCRC32Offset = 0;
 const uint32_t rowTSOffset = sizeof(CRC32);
 const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(TimeStamp);
 const uint32_t pbrbAsyncQueueSize = 32;
+using SchemaParserMap = std::unordered_map<SchemaId, SchemaParser *>;
 
 inline bool isValid(uint32_t testVal) { return !(testVal & ERRMASK); }
 
-using IndexerT = oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
+using IndexerT =
+    oneapi::tbb::concurrent_map<decltype(Key::primaryKey), ValuePtr>;
 using IndexerList = std::unordered_map<SchemaId, std::shared_ptr<IndexerT>>;
 using IndexerIterator = IndexerT::iterator;
 
+// async buffer entry
 struct AsyncBufferEntry {
   uint32_t _entry_size = 0;
   TimeStamp _oldTS;
@@ -86,6 +95,7 @@ struct AsyncBufferEntry {
   }
 };
 
+// async buffer queue
 class AsyncBufferQueue {
  private:
   SchemaId _schema_id = 0;
@@ -149,27 +159,80 @@ class AsyncBufferQueue {
            _dequeue_tail.load(std::memory_order_relaxed);
   }
 };
+// Staticstics:
+// Hit Ratio
+struct AccessStatistics {
+  uint64_t accessCount = 0;
+  uint64_t hitCount = 0;
+  uint64_t lastHitCount = 0;
+  std::vector<uint64_t> hitVec;
+  uint64_t interval = 200000;
 
+  inline bool updateVec() {
+    if (accessCount % interval == 0) {
+      hitVec.push_back(hitCount - lastHitCount);
+      lastHitCount = hitCount;
+      return true;
+    }
+    return false;
+  }
+  inline bool hit() {
+    accessCount++;
+    hitCount++;
+    return updateVec();
+  }
+  inline bool miss() {
+    accessCount++;
+    return updateVec();
+  }
+  inline double getHitRatio() {
+    if (accessCount > 0)
+      return (double)hitCount / accessCount;
+    else
+      return 2;
+  }
+  inline double getLastIntervalHitRatio() {
+    if (hitVec.size() == 0) {
+      return 0;
+    } else {
+      return (double)hitVec.back() / interval;
+    }
+  }
+};
+// PBRB interface
 class PBRB {
  public:
-#ifdef ENABLE_BREAKDOWN
-  void analyzePerf() {
-    auto outputVector = [](std::vector<double> &vec, std::string &&name) {
-      double total = std::accumulate<std::vector<double>::iterator, double>(
-          vec.begin(), vec.end(), 0);
-      NKV_LOG_I(std::cout,
-                "Number of {}: {}, total time cost: {:.2f} s, average time "
-                "cost: {:.2f} ns",
-                name, vec.size(), total / 1000000000, total / vec.size());
-    };
-    outputVector(findSlotNss, std::string("findSlotNss"));
-    outputVector(fcrpNss, std::string("fcrpNss"));
-    outputVector(searchingIdxNss, std::string("searchingIdxNss"));
-  }
-  std::vector<double> findSlotNss;
-  std::vector<double> fcrpNss;
-  std::vector<double> searchingIdxNss;
-#endif
+  // constructor
+  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
+       SchemaUMap *umap, SchemaParserMap *sParser, PmemEngine *enginePtr,
+       uint64_t retentionWindowMicrosecs = 2000, uint32_t maxPageSearchNum = 5,
+       bool async_pbrb = false, bool enable_async_gc = false,
+       double targetOccupancyRatio = 0.7, uint64_t gcIntervalMicrosecs = 100000,
+       double hitThreshold = 0.3);
+
+  bool traverseIdxGC();
+  // dtor
+  ~PBRB();
+  bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
+            SchemaId schemaId, vector<Value> &value, ValuePtr *vPtr,
+            vector<uint32_t> fields = std::vector<uint32_t>());
+  bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
+            SchemaId schemaId, Value &value, ValuePtr *vPtr,
+            uint32_t fieldId = UINT32_MAX);
+  bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
+             const Value &value, IndexerIterator iter);
+
+  bool dropRow(RowAddr rAddr, Schema *schemaPtr);
+
+  bool evictRow(IndexerIterator &iter, Schema *schemaPtr);
+
+  bool schemaHit(SchemaId sid);
+  bool schemaMiss(SchemaId sid);
+  double getHitRatio(SchemaId sid);
+  void outputHitRatios();
+
+  // create a pageList for a SKV table according to schemaID
+  BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer = 0);
 
  private:
   std::atomic_bool _isGCRunning{false};
@@ -194,6 +257,7 @@ class PBRB {
   uint32_t _splitCnt = 0;
   uint32_t _evictCnt = 0;
   SchemaUMap *_schemaUMap;
+  SchemaParserMap *_sParser;
 
   friend class BufferListBySchema;
   std::map<SchemaId, std::shared_ptr<BufferListBySchema>> _bufferMap;
@@ -213,17 +277,14 @@ class PBRB {
 
   // GC
   bool _asyncGC = false;
-  std::chrono::microseconds _gcIntervalMicrosecs = std::chrono::microseconds(50000);
+  std::chrono::microseconds _gcIntervalMicrosecs =
+      std::chrono::microseconds(50000);
   uint64_t GCFailedTimes = 0;
-  uint64_t _retentionWindowMicrosecs = 10;  
+  uint64_t _retentionWindowMicrosecs = 10;
   double _targetOccupancyRatio = 0.7;
   double _startGCOccupancyRatio = 0.75;
   double _hitThreshold = 0.3;
   std::mutex _createCacheMutex;
-
- public:
-  // create a pageList for a SKV table according to schemaID
-  BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer = 0);
 
  private:
   BufferPage *getPageAddr(void *rowAddr);
@@ -320,91 +381,12 @@ class PBRB {
   }
 
  private:
-  // Staticstics:
-  // Hit Ratio
-  struct AccessStatistics {
-    uint64_t accessCount = 0;
-    uint64_t hitCount = 0;
-    uint64_t lastHitCount = 0;
-    std::vector<uint64_t> hitVec;
-    uint64_t interval = 200000;
-
-    inline bool updateVec() {
-      if (accessCount % interval == 0) {
-        hitVec.push_back(hitCount - lastHitCount);
-        lastHitCount = hitCount;
-        return true;
-      }
-      return false;
-    }
-    inline bool hit() {
-      accessCount++;
-      hitCount++;
-      return updateVec();
-    }
-    inline bool miss() {
-      accessCount++;
-      return updateVec();
-    }
-    inline double getHitRatio() {
-      if (accessCount > 0)
-        return (double)hitCount / accessCount;
-      else
-        return 2;
-    }
-    inline double getLastIntervalHitRatio() {
-      if (hitVec.size() == 0) {
-        return 0;
-      } else {
-        return (double)hitVec.back() / interval;
-      }
-    }
-  };
-
   std::unordered_map<SchemaId, AccessStatistics> _AccStatBySchema;
-
- public:
-  bool schemaHit(SchemaId sid) {
-    auto &accStat = _AccStatBySchema[sid];
-    if (accStat.hit())
-      ;  // traverseIdxGC();
-    return true;
-  }
-  bool schemaMiss(SchemaId sid) {
-    auto &accStat = _AccStatBySchema[sid];
-    if (accStat.miss())
-      ;  // traverseIdxGC();
-    return true;
-  }
-  double getHitRatio(SchemaId sid) {
-    auto it = _AccStatBySchema.find(sid);
-    if (it == _AccStatBySchema.end()) return -1;
-    return (double)(it->second.hitCount) / it->second.accessCount;
-  }
-
-  void outputHitRatios() {
-    for (auto &it : _AccStatBySchema) {
-      auto &hitVec = it.second.hitVec;
-      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratio: {} / {} = {:.2f}",
-                it.first, it.second.hitCount, it.second.accessCount,
-                (double)it.second.hitCount / it.second.accessCount);
-      std::string hitStr, ratioStr;
-      std::for_each(hitVec.begin(), hitVec.end(), [&](uint64_t x) {
-        fmt::format_to(std::back_inserter(hitStr), "{:8d} ", x);
-        fmt::format_to(std::back_inserter(ratioStr), "{:8.3f} ",
-                       (double)x / it.second.interval);
-      });
-
-      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
-                it.first, it.second.interval, hitStr);
-      NKV_LOG_I(std::cout, "(SchemaId: {}): Hit Ratios per {} accesses: {}",
-                it.first, it.second.interval, ratioStr);
-    }
-  }
 
  private:
   std::future<bool> _GCResult;
   std::mutex _traverseIdxGCLock;
+  PmemEngine *_enginePtr;
   // GC
  private:
   bool _traverseIdxGCBySchema(SchemaId schemaid);
@@ -423,26 +405,24 @@ class PBRB {
   void asyncWriteHandler(decltype(&_asyncThreadPollList));
 
  public:
-  bool traverseIdxGC();
-
- public:
-  // constructor
-  PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
-       SchemaUMap *umap, uint64_t retentionWindowMicrosecs = 2000,
-       uint32_t maxPageSearchNum = 5, bool async_pbrb = false,
-       bool enable_async_gc = false, double targetOccupancyRatio = 0.7,
-       uint64_t gcIntervalMicrosecs = 100000, double hitThreshold = 0.3);
-  // dtor
-  ~PBRB();
-  bool read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
-            SchemaId schemaId, Value &value, ValuePtr *vPtr,
-            std::vector<uint32_t> fields = std::vector<uint32_t>());
-  bool write(TimeStamp oldTS, TimeStamp newTS, SchemaId schemaId,
-             const Value &value, IndexerIterator iter);
-
-  bool dropRow(RowAddr rAddr);
-
-  bool evictRow(IndexerIterator &iter);
+#ifdef ENABLE_BREAKDOWN
+  void analyzePerf() {
+    auto outputVector = [](std::vector<double> &vec, std::string &&name) {
+      double total = std::accumulate<std::vector<double>::iterator, double>(
+          vec.begin(), vec.end(), 0);
+      NKV_LOG_I(std::cout,
+                "Number of {}: {}, total time cost: {:.2f} s, average time "
+                "cost: {:.2f} ns",
+                name, vec.size(), total / 1000000000, total / vec.size());
+    };
+    outputVector(findSlotNss, std::string("findSlotNss"));
+    outputVector(fcrpNss, std::string("fcrpNss"));
+    outputVector(searchingIdxNss, std::string("searchingIdxNss"));
+  }
+  std::vector<double> findSlotNss;
+  std::vector<double> fcrpNss;
+  std::vector<double> searchingIdxNss;
+#endif
 
   friend class BufferListBySchema;
 

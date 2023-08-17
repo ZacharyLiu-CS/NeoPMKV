@@ -10,6 +10,7 @@
 #include "buffer_list.h"
 #include "buffer_page.h"
 #include "pbrb.h"
+#include "schema.h"
 
 namespace NKV {
 
@@ -34,8 +35,8 @@ void BufferListBySchema::setInfo(SchemaId schemaId, uint32_t pageSize,
   rowSize = ((valueSize + rowHeaderSize - 1) / 8 + 1) * 8;
 
   NKV_LOG_D(std::cout,
-            "PageHeaderSize: {}, OccupancyBitmapSize: {}, RowSize: {}",
-            pageHeaderSize, occuBitmapSize, rowSize);
+            "PageHeaderSize: {}, OccupancyBitmapSize: {}, RowSize: {}, ValueSize: {}, RowHeaderSize: {}",
+            pageHeaderSize, occuBitmapSize, rowSize, valueSize, rowHeaderSize);
   setOccuBitmapSize(pageSize);
   maxRowCnt = (pageSize - pageHeaderSize) / rowSize;
 }

@@ -57,16 +57,16 @@ TEST_F(VariableFieldTest, TestCreation) {
   std::vector<NKV::SchemaField> fields{
       NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
       NKV::SchemaField(NKV::FieldType::VARSTR, "f2", 16)};
-  auto schemaid = neopmkv_->createSchema(fields, 0, "test0");
+  auto schemaid = neopmkv_->CreateSchema(fields, 0, "test0");
   std::vector<NKV::SchemaField> fields2{
       NKV::SchemaField(NKV::FieldType::STRING, "pk", 16),
       NKV::SchemaField(NKV::FieldType::VARSTR, "f2", 16)};
-  schemaid = neopmkv_->createSchema(fields2, 0, "test1");
+  schemaid = neopmkv_->CreateSchema(fields2, 0, "test1");
   std::vector<NKV::SchemaField> fields3{
       NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
       NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
       NKV::SchemaField(NKV::FieldType::VARSTR, "f2", 32)};
-  schemaid = neopmkv_->createSchema(fields3, 0, "test2");
+  schemaid = neopmkv_->CreateSchema(fields3, 0, "test2");
 }
 
 TEST_F(VariableFieldTest, TestVarStrConent) {
@@ -94,18 +94,25 @@ class ParserTest : public testing::Test {
     _parser = new SchemaParser(_memPoolPtr);
   }
   Schema BuildSchema(std::string name, std::vector<NKV::SchemaField> &fields) {
-    return _schemaAllocator.createSchema(name, 0, fields);
+    return _schemaAllocator.CreateSchema(name, 0, fields);
   }
   std::string FromUserToSeqRow(Schema *schemaPtr, std::vector<Value> &values) {
     return _parser->ParseFromUserWriteToSeq(schemaPtr, values);
   }
-  char *FromSeqToTwoPart(Schema *schemaPtr, std::string &seqValue) {
+  bool FromSeqToTwoPart(Schema *schemaPtr, std::string &seqValue) {
     return _parser->ParseFromSeqToTwoPart(schemaPtr, seqValue);
   }
-  std::string FromTwoPartToSeq(Schema *schemaPtr, char *rowFiexdPart,
-                               char *rowVarPart) {
-    return _parser->ParseFromTwoPartToSeq(schemaPtr, rowFiexdPart, rowVarPart);
+  bool FromTwoPartToSeq(Schema *schemaPtr, std::string &seqValue,
+                        char *rowFiexdPart) {
+    return _parser->ParseFromTwoPartToSeq(schemaPtr, seqValue, rowFiexdPart);
   }
+  bool FreeTwoPartRow(Schema *schemaPtr, char *value) {
+    return _parser->FreeTwoPartRow(schemaPtr, value);
+  }
+
+  uint32_t GetPoolAllocateCount() { return _memPoolPtr->GetAllocateCount(); }
+
+  uint32_t GetPoolFreeCount() { return _memPoolPtr->GetFreeCount(); }
   void TearDown() override {
     delete _memPoolPtr;
     delete _parser;
@@ -175,11 +182,16 @@ TEST_F(ParserTest, TestSeqRowFormat) {
   //   for (auto& el : res2)
   // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff &
   // (unsigned int)el) << " "; std::cout << '\n';
-  char *varPart = FromSeqToTwoPart(&test2, res2);
+  bool dataRes = FromSeqToTwoPart(&test2, res2);
   //  for (auto& el : res2)
   // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff &
   // (unsigned int)el) << " "; std::cout << '\n'; printf("variable part: %s\n",
   // varPart);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentSize, 21);
+  EXPECT_EQ(((VarFieldContent *)(res2.data() + 20))->contentType,
+            VarFieldType::ONLY_PONTER);
+
+
   std::vector<Value> fieldValues2(3);
   valueReader2.ExtractFieldFromRow(res2.data(), 0, fieldValues2[0]);
   valueReader2.ExtractFieldFromRow(res2.data(), 1, fieldValues2[1]);
@@ -190,12 +202,15 @@ TEST_F(ParserTest, TestSeqRowFormat) {
 
   EXPECT_EQ(*(uint32_t *)res2.data(), 49);
   EXPECT_EQ(res2.size(), 32);
-  EXPECT_NE(varPart, nullptr);
+  EXPECT_EQ(dataRes, true);
 
-  std::string res3 = FromTwoPartToSeq(&test2, res2.data(), varPart);
+  std::string res3;
+  FromTwoPartToSeq(&test2, res3, res2.data());
   EXPECT_EQ(*(uint32_t *)res3.data(), 49);
   EXPECT_EQ(res3.size(), 53);
-  EXPECT_EQ(res2.substr(0, 24), res3.substr(0, 24));
+  EXPECT_EQ(res2.substr(0, 20), res3.substr(0, 20));
+  EXPECT_EQ( ((VarFieldContent*)(res3.data()+20))->contentSize , 21);
+  EXPECT_EQ( ((VarFieldContent*)(res3.data()+20))->contentType , VarFieldType::ROW_OFFSET);
   //  for (auto& el : res3)
   // 	std::cout << std::setfill('0') << std::setw(2) << std::hex << (0xff &
   // (unsigned int)el) << " "; std::cout << '\n';
@@ -206,6 +221,12 @@ TEST_F(ParserTest, TestSeqRowFormat) {
   EXPECT_STREQ(values2[0].data(), fieldValues3[0].data());
   EXPECT_STREQ(values2[1].data(), fieldValues3[1].data());
   EXPECT_STREQ(values2[2].data(), fieldValues3[2].data());
+
+
+  // test the free function
+  FreeTwoPartRow(&test2, res2.data());
+  EXPECT_EQ(GetPoolFreeCount(), 1);
+  EXPECT_EQ(GetPoolAllocateCount(), 1);
 }
 
 }  // namespace NKV

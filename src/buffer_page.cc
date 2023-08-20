@@ -44,7 +44,7 @@ bool BufferPage::isBitmapSet(RowOffset rowOffset) {
 void BufferPage::initializePage() {
   // Memset May Cause Performance Problems.
   // Optimized to just clear the header and occuBitMap
-  memset(content, 0, PAGE_HEADER_SIZE);
+  memset(content, 0, PBRB_PAGE_HEADER_SIZE);
   // memset(pagePtr, 0x00, sizeof(BufferPage));
   setMagicPage(0x1010);
   setSchemaIDPage(0);

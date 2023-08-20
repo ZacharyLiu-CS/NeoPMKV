@@ -21,7 +21,7 @@ PBRB::PBRB(int maxPageNumber, TimeStamp *wm, IndexerList *indexerListPtr,
            uint64_t retentionWindowMicrosecs, uint32_t maxPageSearchNum,
            bool async_pbrb, bool enable_async_gc, double targetOccupancyRatio,
            uint64_t gcIntervalMicrosecs, double hitThreshold) {
-  static_assert(PAGE_HEADER_SIZE == 64, "PAGE_HEADER_SIZE != 64");
+  static_assert(PBRB_PAGE_HEADER_SIZE == 64, "PBRB_PAGE_HEADER_SIZE != 64");
   // initialization
 
   _watermark = *wm;
@@ -437,7 +437,7 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
   }
 
   ValueReader fieldReader(schema);
-  bool s = fieldReader.ExtractFieldFromRow(valuePtr, fieldId, value);
+  bool s = fieldReader.ExtractFieldFromFullRow(valuePtr, fieldId, value);
   if (s == false) {
     fieldReader.ExtractFieldFromPmemRow(pagePtr->getPlogAddrRow(addr),
                                         _enginePtr, fieldId, value);
@@ -463,7 +463,7 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
   char *valuePtr = pagePtr->getValuePtr(addr);
   ValueReader fieldReader(schema);
   for (uint32_t i = 0; i < fields.size(); i++) {
-    bool s = fieldReader.ExtractFieldFromRow(valuePtr, fields[i], values[i]);
+    bool s = fieldReader.ExtractFieldFromFullRow(valuePtr, fields[i], values[i]);
     if (s == false) {
       fieldReader.ExtractFieldFromPmemRow(pagePtr->getPlogAddrRow(addr),
                                           _enginePtr, fields[i], values[i]);

@@ -42,8 +42,8 @@ TEST(BufferPageTest, BasicFunctions) {
   ASSERT_EQ(pagePtr->getNextPage(), nextPtr);
 
   uint32_t rowSize = 32;
-  uint32_t valueSize = rowSize - ROW_HEADER_SIZE;
-  uint32_t maxRowCnt = (pageSize - PAGE_HEADER_SIZE) / rowSize;
+  uint32_t valueSize = rowSize - PBRB_ROW_HEADER_SIZE;
+  uint32_t maxRowCnt = (pageSize - PBRB_PAGE_HEADER_SIZE) / rowSize;
 
   // Funtions: RowBitmap
   ASSERT_EQ(126, maxRowCnt);

@@ -65,13 +65,12 @@ class PmemLog : public PmemEngine {
  private:
   // private _append function to write srcdata to plog
   inline PmemAddress _append(char *srcdata, size_t len) {
-    constexpr uint32_t head_size = 0;
-    uint64_t now_tail_offset = _tail_offset.fetch_add(len + head_size);
+    uint64_t now_tail_offset = _tail_offset.fetch_add(len);
     if ((1 + _active_chunk_id.load()) * _plog_meta.chunk_size <
-        now_tail_offset + len + head_size) {
+        now_tail_offset + len ) {
       _mutex.lock();
       _addNewChunk();
-      now_tail_offset = _tail_offset.fetch_add(len + head_size);
+      now_tail_offset = _tail_offset.fetch_add(len);
       _mutex.unlock();
     }
 
@@ -84,9 +83,9 @@ class PmemLog : public PmemEngine {
 
     // *(uint32_t *)pmem_addr = len;
     if (_is_pmem) {
-      _copyToPmem(pmem_addr + head_size, srcdata, len);
+      _copyToPmem(pmem_addr, srcdata, len);
     } else {
-      _copyToNonPmem(pmem_addr + head_size, srcdata, len);
+      _copyToNonPmem(pmem_addr, srcdata, len);
     }
     // atomic modify the tail_offset variable
     return now_tail_offset;

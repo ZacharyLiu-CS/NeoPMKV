@@ -1,12 +1,12 @@
 //
 //  schema.h
-//  PROJECT schema
 //
 //  Created by zhenliu on 22/08/2022.
 //  Copyright (c) 2022 zhenliu <liuzhenm@mail.ustc.edu.cn>.
 //
 
 #pragma once
+#include <bits/stdint-uintn.h>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -18,77 +18,74 @@
 #include <unordered_map>
 #include <vector>
 #include "field_type.h"
+#include "kv_type.h"
 #include "mempool.h"
 #include "profiler.h"
 #include "timestamp.h"
 
 namespace NKV {
 
-using SchemaId = uint32_t;
+using SchemaId = uint16_t;
 using SchemaVer = uint16_t;
+using std::vector;
 
-using PmemAddress = uint64_t;
-using PmemSize = uint64_t;
-const uint32_t PmemEntryHead = 0;
-const uint32_t FieldHeadSize = 0;
-const uint32_t AllFieldHeadSize = sizeof(uint32_t);
-using RowAddr = void *;
-const uint32_t ERRMASK = 1 << 31;
-
-struct Key {
-  uint32_t schemaId;
-  uint64_t primaryKey;
-
-  Key(uint32_t schemaId, uint64_t pkValue) {
-    this->schemaId = schemaId;
-    primaryKey = pkValue;
-  }
-
-  bool operator<(const Key &k) const {
-    if (this->schemaId < k.schemaId)
-      return true;
-    else if (this->schemaId == k.schemaId && this->primaryKey < k.primaryKey)
-      return true;
-    return false;
-  }
+enum RowType : uint16_t {
+  FULL_FIELD = 0,
+  FULL_DATA,
+  PARTIAL_FIELD,
 };
-
-using Value = std::string;
-
-class ValuePtr {
- public:
-  ValuePtr() {}
-  ValuePtr(PmemAddress pmAddr, TimeStamp ts);
-  ValuePtr(RowAddr rowAddr, TimeStamp ts);
-  ~ValuePtr() {}
-  ValuePtr(const ValuePtr &valuePtr);
-
+// Sequential Row format:
+// | Row Meta Head |  field0 content   |   field1 content |
+//  <---- 8B ---->  <-- field size -->  <-- field size -->
+struct RowMetaHead {
  private:
-  PmemAddress _pmemAddr = 0;
-  RowAddr _pbrbAddr = 0;
-  std::atomic<TimeStamp> _timestamp{{0}};
-  std::atomic_bool _isHot{false};
+  uint16_t rowSize;
+  RowType rowType;
+  SchemaId schemaId;
+  SchemaVer schemaVersion;
 
  public:
-  TimeStamp getTimestamp() const {
-    return _timestamp.load(std::memory_order_acquire);
-  }
+  void setMeta(uint16_t rSize, RowType rType, SchemaId sId, SchemaVer sVersion);
+  uint16_t getSize() { return rowSize; }
+  RowType getType() { return rowType; }
+  SchemaId getSchemaId() { return schemaId; }
+  SchemaVer getSchemaVer() { return schemaVersion; }
+} __attribute__((packed));
 
-  PmemAddress getPmemAddr() const { return _pmemAddr; }
+const uint32_t ROW_META_HEAD_SIZE = sizeof(RowMetaHead);
 
-  RowAddr getPBRBAddr() const { return _pbrbAddr; }
+inline RowMetaHead *RowMetaPtr(char *src) {
+  return reinterpret_cast<RowMetaHead *>(src);
+}
+inline char *skipRowMeta(char *src) { return src + ROW_META_HEAD_SIZE; }
 
-  std::pair<bool, TimeStamp> getHotStatus() const;
+// Partial Row format
+// | Row Meta Head |  Partial  Row   Meta |  field0 content  |   field1 content
+// |
+//  <--- 8B  --->   <-- viarbale size -->  <-- field size -->  <-- field size
+//  -->
+struct PartialRowMeta {
+  PmemAddress prevRow;
+  uint8_t metaSize;
+  uint8_t fieldCount;
+  uint8_t fieldArr[0];
 
-  bool isHot() const;
+ public:
+  void setMeta(PmemAddress pRow, uint8_t mSize, vector<uint32_t> &fArr);
+  PmemAddress getPmemAddr() { return prevRow; }
+  uint8_t getMetaSize() { return metaSize; }
+  uint8_t getFieldCount() { return fieldCount; }
+  static uint32_t CalculateSize(uint32_t fieldCount);
+} __attribute__((packed));
 
-  void setColdPmemAddr(PmemAddress pmAddr, TimeStamp newTS = TimeStamp());
-  void evictToCold();
+const uint32_t PARTIAL_ROW_META_SIZE = sizeof(PartialRowMeta);
+inline PartialRowMeta *PartialRowMetaPtr(char *src) {
+  return reinterpret_cast<PartialRowMeta *>(src);
+}
 
-  bool setHotTimeStamp(TimeStamp oldTS, TimeStamp newTS);
-
-  bool setHotPBRBAddr(RowAddr rowAddr, TimeStamp oldTS, TimeStamp newTS);
-};
+inline char *skipPartialRowMeta(char *src) {
+  return src + PARTIAL_ROW_META_SIZE + PartialRowMetaPtr(src)->fieldCount;
+}
 
 struct SchemaField {
   FieldType type;
@@ -118,6 +115,20 @@ struct FieldMetaData {
   bool isVariable;
 };
 
+class Schema;
+
+class ParitalSchema {
+ private:
+  uint32_t allFieldSize;
+  bool hasVariableField = false;
+  std::unordered_map<uint32_t, uint32_t> fMap;
+
+ public:
+  ParitalSchema(Schema *fullSchemaPtr, uint8_t* fields, uint8_t fieldCount);
+  uint32_t getOffset(uint32_t schemaId) { return fMap[schemaId]; }
+  bool checkExisted(uint32_t schemaId) { return fMap.find(schemaId) != fMap.end(); }
+};
+
 struct Schema {
   // define the schema name
   std::string name;
@@ -127,7 +138,7 @@ struct Schema {
   uint32_t primaryKeyField = 0;
   // define the schema data size
   uint32_t size = 0;
-  uint32_t fixedFieldSize = 0;
+  uint32_t allFieldSize = 0;
   // all field attributes
   // meta data of field in storage
   bool hasVariableField = false;
@@ -137,11 +148,17 @@ struct Schema {
   Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
          std::vector<SchemaField> &fields);
 
-  uint32_t getAllFixedFieldSize() { return fixedFieldSize; }
+  Schema buildPartialSchema(PartialRowMeta *partialMetaPtr);
+
+  uint32_t getAllFieldSize() { return allFieldSize; }
 
   uint32_t getSize() { return size; }
+
   inline uint32_t getSize(uint32_t fieldId) {
     return fieldsMeta[fieldId].fieldSize;
+  }
+  inline FieldType getFieldType(uint32_t fieldId) {
+    return fields[fieldId].type;
   }
   uint32_t getFieldId(const std::string &fieldName);
 

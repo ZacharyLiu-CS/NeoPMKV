@@ -238,8 +238,8 @@ class PBRB {
   std::atomic_bool _isGCRunning{false};
   uint32_t _maxPageNumber;
   uint32_t _pageSize = pageSize;
-  uint32_t _pageHeaderSize = PAGE_HEADER_SIZE;
-  uint32_t _rowHeaderSize = ROW_HEADER_SIZE;
+  uint32_t _pageHeaderSize = PBRB_PAGE_HEADER_SIZE;
+  uint32_t _rowHeaderSize = PBRB_ROW_HEADER_SIZE;
 
   uint32_t _maxPageSearchingNum;
 

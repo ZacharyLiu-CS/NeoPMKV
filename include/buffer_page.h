@@ -16,8 +16,8 @@
 
 #include "gtest/gtest_prod.h"
 
-#define PAGE_HEADER_SIZE sizeof(PageHeader)
-#define ROW_HEADER_SIZE sizeof(RowHeader)
+#define PBRB_PAGE_HEADER_SIZE sizeof(PageHeader)
+#define PBRB_ROW_HEADER_SIZE sizeof(RowHeader)
 
 namespace NKV {
 constexpr int pageSize = 4 * 1024;  // 4KB
@@ -35,7 +35,7 @@ struct OccupancyBitmap {
 
 struct PageHeader {
   uint16_t magic = 0;                 // 0 (2)
-  SchemaId schemaId = 0;              // 2 (4)
+  uint32_t schemaId = 0;              // 2 (4)
   uint32_t howRowNum = 0;             // 6 (4)
   BufferPage *prevPagePtr = nullptr;  // 10 (8)
   BufferPage *nextpagePtr = nullptr;  // 18 (8)
@@ -150,22 +150,22 @@ class BufferPage {
 
   // Value:
   inline void getValueRow(RowAddr rAddr, uint32_t valueSize, Value &value) {
-    char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
+    char *valueAddr = (char *)rAddr + PBRB_ROW_HEADER_SIZE;
     value.resize(valueSize);
     memcpy(value.data(), valueAddr, valueSize);
   }
   inline char* getValuePtr(RowAddr rAddr){
-    return (char *)rAddr + ROW_HEADER_SIZE;
+    return (char *)rAddr + PBRB_ROW_HEADER_SIZE;
   }
   // fields -> vector<offset, size>
   inline void getValueRow(RowAddr rAddr, uint32_t valueSize, std::vector<Value> &values,
                           std::vector<std::pair<uint32_t, uint32_t>> &fields) {
-    char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
+    char *valueAddr = (char *)rAddr + PBRB_ROW_HEADER_SIZE;
     uint32_t i = 0;
     for (auto& [fieldOffset, fieldSize] : fields) {
       values[i].resize(fieldOffset);
       memcpy(values[i].data() , valueAddr + fieldOffset,
-             fieldSize + FieldHeadSize);
+             fieldSize );
       i+=1;
     }
   }
@@ -178,14 +178,14 @@ class BufferPage {
           value, value.size(), valueSize);
       return false;
     }
-    char *valueAddr = (char *)rAddr + ROW_HEADER_SIZE;
+    char *valueAddr = (char *)rAddr + PBRB_ROW_HEADER_SIZE;
     memcpy(valueAddr, value.data(), value.size());
     return true;
   }
 
   // test helper function: get rAddr by rowOffset:
   inline RowAddr _getRowAddr(RowOffset rowOffset, uint32_t rowSize) {
-    return (RowAddr)(content + PAGE_HEADER_SIZE + rowSize * rowOffset);
+    return (RowAddr)(content + PBRB_PAGE_HEADER_SIZE + rowSize * rowOffset);
   }
   // 2. Occupancy Bitmap functions.
 

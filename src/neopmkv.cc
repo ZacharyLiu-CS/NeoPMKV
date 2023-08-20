@@ -144,7 +144,7 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
                       pmem_timer.duration());
   ValueReader valueReader(schemaPtr);
   for (uint32_t i = 0; i < fields.size(); i++)
-    valueReader.ExtractFieldFromRow(allValue.data(), fields[i], values[i]);
+    valueReader.ExtractFieldFromFullRow(allValue.data(), fields[i], values[i]);
 
   if (_enable_pbrb == false) {
     return true;

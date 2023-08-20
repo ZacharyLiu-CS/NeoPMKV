@@ -116,12 +116,11 @@ Status PmemLog::read(PmemAddress readAddr, std::string &value) {
   if (readAddr > _tail_offset.load()) {
     return PmemStatuses::S403_Forbidden_Invalid_Offset;
   }
-  uint32_t read_size = 0;
-  _read((char *)&read_size, readAddr, sizeof(uint32_t));
+  char *valuePtr = _convertToPtr(readAddr);
+  uint32_t readSize = RowMetaPtr(valuePtr)->getSize() + ROW_META_HEAD_SIZE;
+  value.resize(readSize);
 
-  value.resize(read_size + sizeof(uint32_t));
-  *(uint32_t *)value.data() = read_size;
-  _read(value.data()+4, readAddr + sizeof(uint32_t), read_size);
+  _read(value.data(), readAddr, readSize);
   return PmemStatuses::S200_OK_Found;
 }
 Status PmemLog::read(PmemAddress readAddr, std::string &value,
@@ -132,7 +131,7 @@ Status PmemLog::read(PmemAddress readAddr, std::string &value,
   }
   char *valuePtr = _convertToPtr(readAddr);
   ValueReader fieldReader(schemaPtr);
-  fieldReader.ExtractFieldFromRow(valuePtr, fieldId, value);
+  fieldReader.ExtractFieldFromFullRow(valuePtr, fieldId, value);
   return PmemStatuses::S200_OK_Found;
 }
 

@@ -56,7 +56,7 @@ enum class VarFieldType : uint16_t {
   NULL_T = 0,
   NOT_CACHE,
   FULL_DATA,
-  ONLY_PONTER,
+  ONLY_POINTER,
   ROW_OFFSET,
 };
 
@@ -69,7 +69,9 @@ struct VarFieldContent {
     uint64_t contentOffset;
   };
 } __attribute__((packed));
-
+inline VarFieldContent *VarFieldPtr(char *src) {
+  return reinterpret_cast<VarFieldContent *>(src);
+}
 // encode the variable field in cache (two part row) with  full data or pointer
 inline void EncodeToVarFieldFullData(void *dst, void *content, uint32_t size) {
   VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
@@ -91,7 +93,7 @@ inline void EncodeToVarFieldNotCache(void *dst) {
 inline void EncodeToVarFieldOnlyPointer(void *dst, void *content,
                                         uint32_t size) {
   VarFieldContent *dstPtr = reinterpret_cast<VarFieldContent *>(dst);
-  VarFieldType type_ = VarFieldType::ONLY_PONTER;
+  VarFieldType type_ = VarFieldType::ONLY_POINTER;
   assert(size > 8);
   dstPtr->contentType = type_;
   dstPtr->contentSize = size;
@@ -122,7 +124,7 @@ inline auto GetVarFieldContent(void *dst) {
   }
 }
 inline bool FreeVarFieldContent(void *dst, MemPool *poolPtr) {
-  if (GetVarFieldType(dst) == VarFieldType::ONLY_PONTER) {
+  if (GetVarFieldType(dst) == VarFieldType::ONLY_POINTER) {
     poolPtr->Free(GetVarFieldContent(dst));
     return true;
   }

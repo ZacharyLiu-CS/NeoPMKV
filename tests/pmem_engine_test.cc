@@ -12,148 +12,145 @@
 #include "pmem_log.h"
 #include "schema.h"
 
-std::string testBaseDir = "/mnt/pmem0/NKV-TEST";
-NKV::PmemEngine *engine_ptr = nullptr;
-#define HEADER_SIZE sizeof(uint32_t)
+#define HEADER_SIZE NKV::ROW_META_HEAD_SIZE
 
-void CleanTestFile() {
-  bool status = false;
-  if (std::filesystem::exists(testBaseDir)) {
-    status = std::filesystem::remove_all(testBaseDir);
-  } else {
-    status = true;
+class PmemEngineTest : public testing::Test {
+ public:
+  void SetUp() override {}
+  void TearDown() override {}
+  void SetFullData(char *src, uint32_t size, uint32_t content) {
+    ((NKV::RowMetaHead *)src)
+        ->setMeta(size - NKV::ROW_META_HEAD_SIZE, NKV::RowType::FULL_DATA, 0,
+                  0);
+    memset(src + HEADER_SIZE, content, size - HEADER_SIZE);
   }
-  ASSERT_TRUE(status == true);
-}
-TEST(GenerateTest, CreatePLOG) {
-  NKV::PmemEngineConfig plogConfig;
-  plogConfig.chunk_size = 4ULL << 20;
-  plogConfig.engine_capacity = 1ULL << 30;
-  strcpy(plogConfig.engine_path, testBaseDir.c_str());
+  NKV::Status DeleteThenCreateEngine() {
+    NKV::PmemEngineConfig plogConfig;
+    plogConfig.chunk_size = 4ULL << 20;
+    plogConfig.engine_capacity = 1ULL << 30;
+    strcpy(plogConfig.engine_path, testBaseDir.c_str());
 
-  if (std::filesystem::exists(testBaseDir)) {
-    std::filesystem::remove_all(testBaseDir);
+    if (std::filesystem::exists(testBaseDir)) {
+      std::filesystem::remove_all(testBaseDir);
+    }
+    auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
+    delete engine_ptr;
+    return status;
   }
-  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
-  ASSERT_TRUE(status.is2xxOK());
-  delete engine_ptr;
+
+  NKV::Status OpenExistedPLOG() {
+    NKV::PmemEngineConfig plogConfig;
+    strcpy(plogConfig.engine_path, testBaseDir.c_str());
+    auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
+    return status;
+  }
+
+  bool CleanTestFile() {
+    bool status = false;
+    if (std::filesystem::exists(testBaseDir)) {
+      status = std::filesystem::remove_all(testBaseDir);
+    } else {
+      status = true;
+    }
+    return status;
+  }
+
+ public:
+  NKV::PmemEngine *engine_ptr = nullptr;
+  std::string testBaseDir = "/mnt/pmem0/NKV-TEST";
+};
+
+TEST_F(PmemEngineTest, CreatePLOG) {
+  ASSERT_TRUE(DeleteThenCreateEngine().is2xxOK());
 }
 
-TEST(OpenTest, OpenExistedPLOG) {
-  NKV::PmemEngineConfig plogConfig;
-  strcpy(plogConfig.engine_path, testBaseDir.c_str());
-  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
-  ASSERT_TRUE(plogConfig.chunk_size == 4ULL << 20);
-  ASSERT_TRUE(plogConfig.engine_capacity == 1ULL << 30);
-  delete engine_ptr;
+TEST_F(PmemEngineTest, OpenExistedPLOG) {
+  ASSERT_TRUE(OpenExistedPLOG().is2xxOK());
 }
 
-TEST(AppendTest, AppendSmallData) {
-  NKV::PmemEngineConfig plogConfig;
-  strcpy(plogConfig.engine_path, testBaseDir.c_str());
-  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
-  ASSERT_TRUE(status.is2xxOK());
+TEST_F(PmemEngineTest, AppendSmallData) {
+  ASSERT_TRUE(OpenExistedPLOG().is2xxOK());
   int value_length = 128;
-  char *value = (char *)std::malloc(value_length);
-  *(uint32_t *)value = value_length - 4;
+  std::string value(value_length, 0);
+  uint32_t content = 43;
+  SetFullData(value.data(), value_length, content);
 
-  memset(value + HEADER_SIZE, 43, value_length - HEADER_SIZE);
   NKV::PmemAddress pmem_addr;
-  auto result = engine_ptr->append(pmem_addr, value, value_length);
+  auto result = engine_ptr->append(pmem_addr, value.c_str(), value_length);
   ASSERT_TRUE(result.is2xxOK());
   ASSERT_TRUE(pmem_addr == 0);
   delete engine_ptr;
-  free(value);
 }
 
-TEST(ReadTest, ReadSmallData) {
-  NKV::PmemEngineConfig plogConfig;
-  strcpy(plogConfig.engine_path, testBaseDir.c_str());
-  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
-  ASSERT_TRUE(status.is2xxOK());
+TEST_F(PmemEngineTest, ReadSmallData) {
+  ASSERT_TRUE(OpenExistedPLOG().is2xxOK());
   int value_length = 128;
 
-  char *old_value = (char *)std::malloc(value_length);
-
-  *(uint32_t *)old_value = value_length - 4;
-
-  memset(old_value + HEADER_SIZE, 43, value_length - HEADER_SIZE);
-
+  std::string old_value(value_length, 0);
+  
+  uint32_t content = 43;
+  SetFullData(old_value.data(), value_length, content);
   std::string new_value;
 
   NKV::PmemAddress pmem_addr = 0;
   auto result = engine_ptr->read(pmem_addr, new_value);
-  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length), 0);
+  EXPECT_STREQ(old_value.c_str(), new_value.c_str());
 
   ASSERT_TRUE(result.is2xxOK());
   delete engine_ptr;
-  free(old_value);
 }
-TEST(AppendTest, AppendLargeData) {
-  NKV::PmemEngineConfig plogConfig;
-  strcpy(plogConfig.engine_path, testBaseDir.c_str());
-  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
-  ASSERT_TRUE(status.is2xxOK());
-
+TEST_F(PmemEngineTest, AppendLargeData) {
+  ASSERT_TRUE(OpenExistedPLOG().is2xxOK());
   // first large write
   int value_length = 2 << 20;
-  char *value = (char *)std::malloc(value_length);
-  *(uint32_t *)value = value_length - 4;
-
-  memset(value + HEADER_SIZE, 44, value_length - HEADER_SIZE);
+  std::string value(value_length, 0);
+  uint32_t content = 44;
+  SetFullData(value.data(), value_length, content);
+  
   NKV::PmemAddress pmem_addr;
-  auto result = engine_ptr->append(pmem_addr, value, value_length);
+  auto result = engine_ptr->append(pmem_addr, value.c_str(), value_length);
   ASSERT_TRUE(result.is2xxOK());
   ASSERT_EQ(pmem_addr, 128);
 
-  // second larege write
-  memset(value + HEADER_SIZE, 45, value_length - HEADER_SIZE);
-  result = engine_ptr->append(pmem_addr, value, value_length);
+  // second large write
+  content = 45;
+  SetFullData(value.data(), value_length, content);
+  result = engine_ptr->append(pmem_addr, value.c_str(), value_length);
   ASSERT_TRUE(result.is2xxOK());
   ASSERT_EQ(pmem_addr, 2 * value_length);
 
   delete engine_ptr;
-  free(value);
 }
-TEST(ReadTest, ReadLargeData) {
-  NKV::PmemEngineConfig plogConfig;
-  strcpy(plogConfig.engine_path, testBaseDir.c_str());
-  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
-  ASSERT_TRUE(status.is2xxOK());
+TEST_F(PmemEngineTest, ReadLargeData) {
+  ASSERT_TRUE(OpenExistedPLOG().is2xxOK());
   int value_length = 2 << 20;
-  char *old_value = (char *)std::malloc(value_length);
-
-  *(uint32_t *)old_value = value_length -4;
-  memset(old_value + HEADER_SIZE, 44, value_length - HEADER_SIZE);
+  std::string old_value(value_length, 0);
+  uint32_t content = 44;
+  SetFullData(old_value.data(), value_length, content);
 
   std::string new_value;
   NKV::PmemAddress pmem_addr = 128;
   auto result = engine_ptr->read(pmem_addr, new_value);
-  ASSERT_EQ(memcmp(new_value.c_str(), old_value, value_length), 0);
+  EXPECT_STREQ(old_value.c_str(), new_value.c_str());
 
   ASSERT_TRUE(result.is2xxOK());
   delete engine_ptr;
-  free(old_value);
-  CleanTestFile();
 }
 
-TEST(MultiThreadTest, ConcurrentAccessPmemLog) {
-  NKV::PmemEngineConfig plogConfig;
-  plogConfig.chunk_size = 1ull << 10;
-  strcpy(plogConfig.engine_path, testBaseDir.c_str());
-  auto status = NKV::PmemEngine::open(plogConfig, &engine_ptr);
-  ASSERT_TRUE(status.is2xxOK());
+TEST_F(PmemEngineTest, ConcurrentAccessPmemLog) {
+  ASSERT_TRUE(OpenExistedPLOG().is2xxOK());
   int value_length = 64;
   int num_threads = 16;
   int total_ops = 1ull << 10;
+  uint32_t content = 32;
   auto writeToPmemLog = [=](int num_ops) {
     std::string value;
     for (auto i = 0; i < num_ops; i++) {
       value.resize(value_length);
-      *(uint32_t *)value.data() = value_length - HEADER_SIZE;
+      SetFullData(value.data(), value_length, content);
       NKV::PmemAddress addr = 0;
       engine_ptr->append(addr, value.c_str(), value_length);
-      ASSERT_EQ(addr % (value_length ), 0);
+      ASSERT_EQ(addr % (value_length), 0);
     }
   };
   std::vector<std::future<void>> future_pool;

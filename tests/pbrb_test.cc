@@ -148,7 +148,7 @@ class PBRBTest : public testing::Test {
 TEST_F(PBRBTest, TestReadAfterInsert) {
   CreateSchema1();
   CreateSchema2();
-  uint32_t itemCount = 10;
+  uint32_t itemCount = 1 << 10;
   uint32_t seed = 1452;
   SchemaId sid1 = 1;
   SchemaId sid2 = 2;
@@ -173,7 +173,7 @@ TEST_F(PBRBTest, TestReadAfterInsert) {
 TEST_F(PBRBTest, TestReadAfterRead) {
   CreateSchema1();
   CreateSchema2();
-  uint32_t itemCount = 10;
+  uint32_t itemCount = 1 << 10;
   uint32_t seed = 1452;
   SchemaId sid1 = 1;
   SchemaId sid2 = 2;

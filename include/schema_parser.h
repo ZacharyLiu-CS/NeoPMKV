@@ -20,20 +20,13 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+#include "kv_type.h"
 #include "pmem_engine.h"
-#include "schema.h"
 
 namespace NKV {
 
 class Schema;
 class MemPool;
-
-enum MovementTpye : uint8_t {
-  NO_CHANGE = 0,
-  FROM_USER_TO_SEQ,
-  FROM_SEQ_TO_CACHE,
-  FROM_CACHE_TO_SEQ,
-};
 
 using Value = std::string;
 using std::string;
@@ -50,6 +43,10 @@ class SchemaParser {
   // parse from the user write to the string
   static string ParseFromUserWriteToSeq(Schema *schemaPtr,
                                         vector<Value> &fieldValues);
+  static string ParseFromPartialUpdateToRow(Schema *schemaPtr,
+                                            PmemAddress pmemAddr,
+                                            vector<Value> &fieldValues,
+                                            vector<uint32_t> &fields);
   // not only parse from the seq format, but also use memory pool to allocate
   // space and copy the variable part into it
   // not move the seqValue, just shrink the space
@@ -69,7 +66,12 @@ class SchemaParser {
 class ValueReader {
  public:
   ValueReader(Schema *schemaPtr) : _schemaPtr(schemaPtr) {}
-  bool ExtractFieldFromRow(char *rowPtr, uint32_t fieldId, Value &value);
+  bool ExtractFieldFromFullRow(char *rowPtr, uint32_t fieldId, Value &value);
+
+  bool ExtractFieldFromPartialRow(char *rowPtr, uint32_t fieldId, Value &value);
+
+  bool ExtractMultiFieldFromPartialRow(char *rowPtr, vector<uint32_t> &fieldId,
+                                       vector<Value> &value);
 
   bool ExtractFieldFromPmemRow(PmemAddress rowPtr, PmemEngine *enginePtr,
                                uint32_t fieldId, Value &value);

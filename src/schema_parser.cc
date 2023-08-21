@@ -220,7 +220,7 @@ bool SchemaParser::FreeTwoPartRow(Schema *schemaPtr, char *value) {
 bool SchemaParser::ParseFromTwoPartToSeq(Schema *schemaPtr, string &newValue,
                                          char *oldPtr) {
   if (oldPtr == nullptr) return false;
-  if (RowMetaPtr(oldPtr)->getType() != RowType::FULL_FIELD) return false;
+  if (RowMetaPtr(oldPtr)->getType() == RowType::PARTIAL_FIELD) return false;
   uint32_t rowFixedPartSize = schemaPtr->getSize();
 
   uint32_t rowVarPartSize =

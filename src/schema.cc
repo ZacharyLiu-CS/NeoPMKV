@@ -44,7 +44,7 @@ uint32_t PartialRowMeta::CalculateSize(uint32_t fieldCount) {
   return sizeof(PartialRowMeta) + fieldCount;
 }
 
-ParitalSchema::ParitalSchema(Schema *fullSchemaPtr, uint8_t *fields,
+PartialSchema::PartialSchema(Schema *fullSchemaPtr, uint8_t *fields,
                              uint8_t fieldCount) {
   allFieldSize = 0;
   for (uint8_t i = 0; i < fieldCount; i++) {

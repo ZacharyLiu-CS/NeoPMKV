@@ -117,16 +117,18 @@ struct FieldMetaData {
 
 class Schema;
 
-class ParitalSchema {
+class PartialSchema {
  private:
   uint32_t allFieldSize;
   bool hasVariableField = false;
   std::unordered_map<uint32_t, uint32_t> fMap;
 
  public:
-  ParitalSchema(Schema *fullSchemaPtr, uint8_t* fields, uint8_t fieldCount);
+  PartialSchema(Schema *fullSchemaPtr, uint8_t *fields, uint8_t fieldCount);
   uint32_t getOffset(uint32_t schemaId) { return fMap[schemaId]; }
-  bool checkExisted(uint32_t schemaId) { return fMap.find(schemaId) != fMap.end(); }
+  bool checkExisted(uint32_t schemaId) {
+    return fMap.find(schemaId) != fMap.end();
+  }
 };
 
 struct Schema {
@@ -175,6 +177,7 @@ struct Schema {
   inline uint32_t getPBRBOffset(const std::string &fieldName) {
     return getPBRBOffset(getFieldId(fieldName));
   }
+  inline uint32_t getFieldsCount() { return fields.size(); }
 };
 
 class SchemaAllocator {

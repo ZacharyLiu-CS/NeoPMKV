@@ -10,11 +10,13 @@
 #include <memory>
 #include <random>
 #include <string>
+#include "field_type.h"
 #include "gtest/gtest.h"
 #include "kv_type.h"
 #include "logging.h"
 #include "mempool.h"
 #include "neopmkv.h"
+#include "pbrb.h"
 #include "schema.h"
 #include "schema_parser.h"
 
@@ -279,7 +281,41 @@ TEST_F(ParserTest, TestPartialRowTransformation) {
   v2 = valueReader1.ExtractFieldFromPartialRow(res1.data(), 2, fieldValues[1]);
   EXPECT_STREQ(values1[0].data(), fieldValues[0].data());
   EXPECT_STREQ(values1[1].data(), fieldValues[1].data());
+}
 
+TEST_F(ParserTest, TestPartialRowMerge) {
+  std::vector<NKV::SchemaField> s1{
+      NKV::SchemaField(NKV::FieldType::INT64T, "pk"),
+      NKV::SchemaField(NKV::FieldType::INT64T, "f1"),
+      NKV::SchemaField(NKV::FieldType::VARSTR, "f2"),
+      NKV::SchemaField(NKV::FieldType::INT64T, "f3"),
+  };
+
+  Schema schema1 = BuildSchema("test1", s1);
+  std::vector<Value> values1 = {"gg2", "var234567890123455678"};
+  std::vector<uint32_t> fields1 = {1, 2};
+  std::string pv1 = FromPartialWriteToRow(&schema1, 0, values1, fields1);
+  std::vector<Value> values2 = {"10", "20"};
+  std::vector<uint32_t> fields2 = {0, 1};
+  std::string pv2 = FromPartialWriteToRow(&schema1, 0, values2, fields2);
+  std::vector<Value> values3 = {"initial", "initial", "initial", "initial"};
+  std::string v3 = FromUserToSeqRow(&schema1, values3);
+  std::string res;
+  std::vector<Value> allValues({pv1, pv2, v3});
+
+  SchemaParser::MergePartialUpdateToFullRow(&schema1, res, allValues);
+  ValueReader valueReader(&schema1);
+
+  std::string field0Value, field1Value, field2Value, field3Value;
+  EXPECT_TRUE(valueReader.ExtractFieldFromFullRow(res.data(), 0, field0Value));
+  EXPECT_TRUE(valueReader.ExtractFieldFromFullRow(res.data(), 1, field1Value));
+  EXPECT_TRUE(valueReader.ExtractFieldFromFullRow(res.data(), 2, field2Value));
+  EXPECT_TRUE(valueReader.ExtractFieldFromFullRow(res.data(), 3, field3Value));
+
+  EXPECT_EQ(field0Value.substr(0,values2[0].size()), values2[0]);
+  EXPECT_EQ(field1Value.substr(0,values1[0].size()), values1[0]);
+  EXPECT_EQ(field2Value.substr(0,values1[2].size()), values1[1]);
+  EXPECT_EQ(field3Value.substr(0,values3[3].size()), values3[3]);
 }
 }  // namespace NKV
 

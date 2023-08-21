@@ -83,7 +83,6 @@ class NeoPMKV {
   bool Get(Key &key, Value &value);
 
   bool Put(const Key &key, vector<Value> &fieldList);
-  bool Put(const Key &key, const Value &value);
 
   bool PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId);
   bool MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
@@ -98,6 +97,9 @@ class NeoPMKV {
   void outputReadStat();
 
  private:
+  bool putValue(const Key &key, const Value &value);
+  bool updateValue(IndexerIterator &idxIter, const Key &key,
+                   const Value &value);
   bool getValueFromIndexIterator(IndexerIterator &idxIter,
                                  shared_ptr<IndexerT> indexer,
                                  SchemaId schemaid, vector<Value> &value,

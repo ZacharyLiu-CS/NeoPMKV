@@ -7,6 +7,7 @@
 
 
 #include "kv_type.h"
+#include <atomic>
 
 namespace NKV {
 
@@ -37,11 +38,20 @@ namespace NKV {
   }
   bool ValuePtr::isHot() const { return _isHot.load(std::memory_order_acquire); }
 
-  void ValuePtr::setColdPmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
+  void ValuePtr::setFullColdPmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
     _pmemAddr = pmAddr;
     _timestamp.store(newTS, std::memory_order_release);
+    _prevItemCount.store(0, std::memory_order_release);
     _isHot.store(false, std::memory_order_release);
   }
+
+  void ValuePtr::setPartialColdPmemAddr(PmemAddress pmAddr, TimeStamp newTS) {
+    _pmemAddr = pmAddr;
+    _timestamp.store(newTS, std::memory_order_release);
+    _prevItemCount.fetch_add(1, std::memory_order_release);
+    _isHot.store(false, std::memory_order_release);
+  }
+
 
   void ValuePtr::evictToCold() { _isHot.store(false, std::memory_order_release); }
 

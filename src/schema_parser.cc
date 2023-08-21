@@ -7,6 +7,8 @@
 
 #include "schema_parser.h"
 #include <cstring>
+#include <map>
+#include <queue>
 #include "field_type.h"
 #include "kv_type.h"
 #include "mempool.h"
@@ -75,6 +77,7 @@ std::string SchemaParser::ParseFromUserWriteToSeq(
   }
   return result;
 }
+
 string SchemaParser::ParseFromPartialUpdateToRow(Schema *schemaPtr,
                                                  PmemAddress pmemAddr,
                                                  vector<Value> &fieldValues,
@@ -82,7 +85,7 @@ string SchemaParser::ParseFromPartialUpdateToRow(Schema *schemaPtr,
   std::string value;
   uint32_t fieldsCount = fieldValues.size();
   // if the fields is all the shema has
-  if (fieldsCount == schemaPtr->fields.size())
+  if (fieldsCount == schemaPtr->getFieldsCount())
     return ParseFromUserWriteToSeq(schemaPtr, fieldValues);
 
   uint32_t fieldsSize = 0;
@@ -255,7 +258,58 @@ bool SchemaParser::ParseFromTwoPartToSeq(Schema *schemaPtr, string &newValue,
     }
     newFieldPtr += i.fieldSize;
   }
+  return true;
+}
 
+bool SchemaParser::MergePartialUpdateToFullRow(Schema *schemaPtr,
+                                               string &seqValue,
+                                               vector<Value> &valueList) {
+  // only one value, must be full data
+  if (valueList.size() == 1) {
+    auto rowMetaPtr = RowMetaPtr(valueList.front().data());
+    assert(rowMetaPtr->getType() != RowType::PARTIAL_FIELD);
+    seqValue.assign(valueList.front());
+    return true;
+  }
+  uint32_t partialValueCount = valueList.size() - 1;
+  uint32_t fieldCount = schemaPtr->getFieldsCount();
+  uint32_t fullValueId = valueList.size() - 1;
+  ValueReader valueReader(schemaPtr);
+  std::vector<Value> allFieldValues(fieldCount);
+
+  std::vector<PartialSchema> partialSchemaList;
+  // construct the partial schema list
+  for (uint32_t pId = 0; pId < partialValueCount; pId++) {
+    PartialRowMeta *pMetaPtr =
+        PartialRowMetaPtr(skipRowMeta(valueList[pId].data()));
+    partialSchemaList.push_back(
+        PartialSchema(schemaPtr, pMetaPtr->fieldArr, pMetaPtr->fieldCount));
+  }
+  // fieldMapping : {fieldId => Partial Value Id}
+  std::map<uint32_t, uint32_t> fieldMapping;
+  for (uint32_t fieldId = 0; fieldId < fieldCount; fieldId++) {
+    bool found = false;
+    for (uint32_t pId = 0; pId < partialValueCount && found == false; pId++) {
+      // found in the prev partial row
+      if (partialSchemaList[pId].checkExisted(fieldId)) {
+        fieldMapping.insert({fieldId, pId});
+        found = true;
+      }
+    }
+    // if no found, must be in the old full row
+    if (found == false) fieldMapping.insert({fieldId, fullValueId});
+  }
+  for (auto &[fieldId, valueId] : fieldMapping) {
+    // partial value
+    if (valueId != fullValueId) {
+      valueReader.ExtractFieldFromPartialRow(valueList[valueId].data(), fieldId,
+                                             allFieldValues[fieldId]);
+    } else {
+      valueReader.ExtractFieldFromFullRow(valueList[valueId].data(), fieldId,
+                                             allFieldValues[fieldId]);
+    }
+  }
+  seqValue.assign(ParseFromUserWriteToSeq(schemaPtr,allFieldValues));
   return true;
 }
 
@@ -314,7 +368,7 @@ bool ValueReader::ExtractFieldFromPartialRow(char *rowPtr, uint32_t fieldId,
                                              Value &value) {
   if (RowMetaPtr(rowPtr)->getType() != RowType::PARTIAL_FIELD) return false;
   PartialRowMeta *pMetaPtr = PartialRowMetaPtr(skipRowMeta(rowPtr));
-  ParitalSchema pSchema(_schemaPtr, pMetaPtr->fieldArr, pMetaPtr->fieldCount);
+  PartialSchema pSchema(_schemaPtr, pMetaPtr->fieldArr, pMetaPtr->fieldCount);
   if (pSchema.checkExisted(fieldId) == false) {
     return false;
   }
@@ -352,7 +406,7 @@ bool ValueReader::ExtractMultiFieldFromPartialRow(char *rowPtr,
   if (RowMetaPtr(rowPtr)->getType() != RowType::PARTIAL_FIELD) return false;
   PartialRowMeta *pMetaPtr = PartialRowMetaPtr(skipRowMeta(rowPtr));
 
-  ParitalSchema pSchema(_schemaPtr, pMetaPtr->fieldArr, pMetaPtr->fieldCount);
+  PartialSchema pSchema(_schemaPtr, pMetaPtr->fieldArr, pMetaPtr->fieldCount);
   values.resize(fieldsId.size());
   // iterate to extract the value
   for (uint32_t i = 0; i < fieldsId.size(); i++) {

@@ -107,7 +107,7 @@ class PBRBTest : public testing::Test {
   void Insert(uint32_t key, SchemaId sid) {
     auto indexer = _indexerList[sid];
     ValuePtr vp1 = ValuePtr();
-    vp1.setColdPmemAddr((PmemAddress)&vp1);
+    vp1.setFullColdPmemAddr((PmemAddress)&vp1);
     indexer->insert({key, vp1});
   }
   bool CacheData(uint32_t key, uint32_t seed, SchemaId sid) {

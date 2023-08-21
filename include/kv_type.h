@@ -12,6 +12,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -58,6 +59,10 @@ class ValuePtr {
   PmemAddress _pmemAddr = 0;
   RowAddr _pbrbAddr = 0;
   std::atomic<TimeStamp> _timestamp{{0}};
+  // identify the previous record count
+  // 0 : full record, no prev record
+  // 1 ~ N : partial record, has prev records
+  std::atomic_uint8_t _prevItemCount{0};
   std::atomic_bool _isHot{false};
 
  public:
@@ -73,7 +78,18 @@ class ValuePtr {
 
   bool isHot() const;
 
-  void setColdPmemAddr(PmemAddress pmAddr, TimeStamp newTS = TimeStamp());
+  void setFullColdPmemAddr(PmemAddress pmAddr, TimeStamp newTS = TimeStamp());
+
+  void setPartialColdPmemAddr(PmemAddress pmAddr,
+                              TimeStamp newTS = TimeStamp());
+
+  uint8_t getPrevItemCount() {
+    return _prevItemCount.load(std::memory_order_relaxed);
+  }
+  bool isFullRecord(){
+    return _prevItemCount.load(std::memory_order_relaxed) == 0;
+  }
+
   void evictToCold();
 
   bool setHotTimeStamp(TimeStamp oldTS, TimeStamp newTS);

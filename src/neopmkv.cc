@@ -60,7 +60,7 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
       return true;
     }
   }
-
+  //TODO: add the merge logic
   // Read PLog get a value
   Schema *schemaPtr = _sMap.find(schemaid);
   POINT_PROFILE_START(pmem_timer);
@@ -267,10 +267,10 @@ bool NeoPMKV::Put(const Key &key, vector<Value> &fieldList) {
   Schema *schemaPtr = _sMap.find(key.schemaId);
   std::string value =
       _sParser[key.schemaId]->ParseFromUserWriteToSeq(schemaPtr, fieldList);
-  return Put(key, value);
+  return putValue(key, value);
 }
 
-bool NeoPMKV::Put(const Key &key, const Value &value) {
+bool NeoPMKV::putValue(const Key &key, const Value &value) {
   auto indexer = _indexerList[key.schemaId];
 
   PmemAddress pmAddr;
@@ -303,79 +303,68 @@ bool NeoPMKV::Put(const Key &key, const Value &value) {
   if (_enable_pbrb == true && iter->second.isHot() == true) {
     _pbrb->dropRow(iter->second.getPBRBAddr(), _sMap.find(key.schemaId));
   }
-  iter->second.setColdPmemAddr(pmAddr, putTs);
+  iter->second.setFullColdPmemAddr(pmAddr, putTs);
 
   return true;
 }
-
 bool NeoPMKV::PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId) {
+  Schema *schemaPtr = _sMap.find(key.schemaId);
+  vector<Value> valueList = {fieldValue};
+  vector<uint32_t> fieldList = {fieldId};
   auto indexer = _indexerList[key.schemaId];
 
-  POINT_PROFILE_START(index_timer);
   IndexerIterator idxIter = indexer->find(key.primaryKey);
+  if(idxIter == indexer->end()){
+    return false;
+  }
 
-  POINT_PROFILE_END(index_timer);
-  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
-  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
-                      index_timer.duration());
-
-  if (idxIter == indexer->end()) return false;
-  ValuePtr &vPtr = idxIter->second;
-  PmemAddress pmemAddr = vPtr.getPmemAddr();
-  TimeStamp updatetTs;
-  updatetTs.getNow();
-
-  POINT_PROFILE_START(pmem_timer);
-  uint32_t fieldOffset = _sMap.find(key.schemaId)->getPmemOffset(fieldId);
-  _engine_ptr->write(pmemAddr + fieldOffset, fieldValue.c_str(),
-                     fieldValue.size());
-
-  POINT_PROFILE_END(pmem_timer);
-  PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateCount, 1);
-  PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateTimeNanoSecs,
-                      pmem_timer.duration());
-
-  vPtr.setColdPmemAddr(pmemAddr, updatetTs);
-  return true;
+  std::string value = _sParser[key.schemaId]->ParseFromPartialUpdateToRow(
+      schemaPtr, idxIter->second.getPmemAddr(), valueList, fieldList);
+  return updateValue(idxIter, key, value);
 }
 
 bool NeoPMKV::MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
                                  vector<uint32_t> &fields) {
-  assert(fields.size() == fieldValues.size());
+  Schema *schemaPtr = _sMap.find(key.schemaId);
   auto indexer = _indexerList[key.schemaId];
 
-  POINT_PROFILE_START(index_timer);
   IndexerIterator idxIter = indexer->find(key.primaryKey);
-
-  POINT_PROFILE_END(index_timer);
-  PROFILER_ATMOIC_ADD(_durationStat.indexQueryCount, 1);
-  PROFILER_ATMOIC_ADD(_durationStat.indexQueryTimeNanoSecs,
-                      index_timer.duration());
-
-  if (idxIter == indexer->end()) return false;
-  ValuePtr &vPtr = idxIter->second;
-  PmemAddress pmemAddr = vPtr.getPmemAddr();
-  TimeStamp updatetTs;
-  updatetTs.getNow();
-
-  POINT_PROFILE_START(pmem_timer);
-  for (uint32_t i = 0; i < fields.size(); i++) {
-    uint32_t fieldId = fields[i];
-    Value &fieldContent = fieldValues[i];
-    uint32_t fieldOffset = _sMap.find(key.schemaId)->getPmemOffset(fieldId);
-    _engine_ptr->write(pmemAddr + fieldOffset, fieldContent.c_str(),
-                       fieldContent.size());
+  if(idxIter == indexer->end()){
+    return false;
   }
+
+  std::string value = _sParser[key.schemaId]->ParseFromPartialUpdateToRow(
+      schemaPtr, idxIter->second.getPmemAddr(), fieldValues, fields);
+  return updateValue(idxIter, key, value);
+}
+
+bool NeoPMKV::updateValue(IndexerIterator &idxIter, const Key &key,
+                          const Value &value) {
+
+  PmemAddress pmAddr;
+  POINT_PROFILE_START(pmem_timer);
+  Status s = _engine_ptr->append(pmAddr, value.c_str(), value.size());
 
   POINT_PROFILE_END(pmem_timer);
   PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateCount, 1);
   PROFILER_ATMOIC_ADD(_durationStat.pmemUpdateTimeNanoSecs,
                       pmem_timer.duration());
 
-  vPtr.setColdPmemAddr(pmemAddr, updatetTs);
+  if (!s.is2xxOK()) return false;
+  TimeStamp putTs;
+  putTs.getNow();
+  ValuePtr vPtr(pmAddr, putTs);
+
+  // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value, vPtr);
+  // status is true means insert success, we don't have the kv before
+  // status is false means having the old kv
+  if (_enable_pbrb == true && idxIter->second.isHot() == true) {
+    _pbrb->dropRow(idxIter->second.getPBRBAddr(), _sMap.find(key.schemaId));
+  }
+  idxIter->second.setPartialColdPmemAddr(pmAddr, putTs);
+
   return true;
 }
-
 bool NeoPMKV::Remove(Key &key) {
   auto indexer = _indexerList[key.schemaId];
 

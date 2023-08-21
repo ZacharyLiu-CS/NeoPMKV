@@ -306,10 +306,10 @@ bool SchemaParser::MergePartialUpdateToFullRow(Schema *schemaPtr,
                                              allFieldValues[fieldId]);
     } else {
       valueReader.ExtractFieldFromFullRow(valueList[valueId].data(), fieldId,
-                                             allFieldValues[fieldId]);
+                                          allFieldValues[fieldId]);
     }
   }
-  seqValue.assign(ParseFromUserWriteToSeq(schemaPtr,allFieldValues));
+  seqValue.assign(ParseFromUserWriteToSeq(schemaPtr, allFieldValues));
   return true;
 }
 
@@ -444,4 +444,17 @@ bool ValueReader::ExtractMultiFieldFromPartialRow(char *rowPtr,
 
   return true;
 }
+
+RowType ValueReader::ExtractRowTypeFromRow(char *rowPtr) {
+  return RowMetaPtr(rowPtr)->getType();
+}
+
+PmemAddress ValueReader::ExtractPrevRowFromPartialRow(char *rowPtr) {
+  return PartialRowMetaPtr(skipRowMeta(rowPtr))->getPmemAddr();
+}
+
+SchemaVer ValueReader::ExtractVersionFromRow(char *rowPtr) {
+  return RowMetaPtr(rowPtr)->getSchemaVer();
+}
+
 }  // namespace NKV

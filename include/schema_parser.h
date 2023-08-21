@@ -23,6 +23,7 @@
 #include <vector>
 #include "kv_type.h"
 #include "pmem_engine.h"
+#include "schema.h"
 
 namespace NKV {
 
@@ -81,6 +82,12 @@ class ValueReader {
 
   bool ExtractFieldFromPmemRow(PmemAddress rowPtr, PmemEngine *enginePtr,
                                uint32_t fieldId, Value &value);
+
+  RowType ExtractRowTypeFromRow(char*rowPtr);
+
+  PmemAddress ExtractPrevRowFromPartialRow(char*rowPtr);
+
+  SchemaVer ExtractVersionFromRow(char*rowPtr);
 
  private:
   Schema *_schemaPtr = nullptr;

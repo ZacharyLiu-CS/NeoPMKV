@@ -60,14 +60,30 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
       return true;
     }
   }
-  //TODO: add the merge logic
+  // TODO: add the merge logic
   // Read PLog get a value
   Schema *schemaPtr = _sMap.find(schemaid);
+  ValueReader valueReader(schemaPtr);
   POINT_PROFILE_START(pmem_timer);
+  // read the full value
   if (fieldId == UINT32_MAX) {
-    Status s = _engine_ptr->read(vPtr.getPmemAddr(), value);
+    Value v;
+    Status s = _engine_ptr->read(vPtr.getPmemAddr(), v);
+    if (vPtr.getPrevItemCount() != 0) {
+      vector<Value> allValues;
+      while (valueReader.ExtractRowTypeFromRow(v.data()) ==
+             RowType::PARTIAL_FIELD) {
+        allValues.push_back(v);
+        s = _engine_ptr->read(
+            valueReader.ExtractPrevRowFromPartialRow(v.data()), v);
+      }
+      allValues.push_back(v);
+      SchemaParser::MergePartialUpdateToFullRow(schemaPtr, value, allValues);
+    }
     assert(s.is2xxOK());
-  } else {
+  }
+  // read the partial field
+  if (fieldId != UINT32_MAX) {
     Status s = _engine_ptr->read(vPtr.getPmemAddr(), value, schemaPtr, fieldId);
     assert(s.is2xxOK());
   }
@@ -134,15 +150,26 @@ bool NeoPMKV::getValueFromIndexIterator(IndexerIterator &idxIter,
     return true;
   }
   Schema *schemaPtr = _sMap.find(schemaid);
+  ValueReader valueReader(schemaPtr);
   // Read PLog get a value
   POINT_PROFILE_START(pmem_timer);
   Value allValue;
-  _engine_ptr->read(vPtr.getPmemAddr(), allValue);
+  Status s = _engine_ptr->read(vPtr.getPmemAddr(), allValue);
+  if (vPtr.getPrevItemCount() != 0) {
+    vector<Value> allValues;
+    while (valueReader.ExtractRowTypeFromRow(allValue.data()) ==
+           RowType::PARTIAL_FIELD) {
+      allValues.push_back(allValue);
+      s = _engine_ptr->read(
+          valueReader.ExtractPrevRowFromPartialRow(allValue.data()), allValue);
+    }
+    allValues.push_back(allValue);
+    SchemaParser::MergePartialUpdateToFullRow(schemaPtr, allValue, allValues);
+  }
   POINT_PROFILE_END(pmem_timer);
   PROFILER_ATMOIC_ADD(_durationStat.pmemReadCount, 1);
   PROFILER_ATMOIC_ADD(_durationStat.pmemReadTimeNanoSecs,
                       pmem_timer.duration());
-  ValueReader valueReader(schemaPtr);
   for (uint32_t i = 0; i < fields.size(); i++)
     valueReader.ExtractFieldFromFullRow(allValue.data(), fields[i], values[i]);
 
@@ -314,7 +341,7 @@ bool NeoPMKV::PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId) {
   auto indexer = _indexerList[key.schemaId];
 
   IndexerIterator idxIter = indexer->find(key.primaryKey);
-  if(idxIter == indexer->end()){
+  if (idxIter == indexer->end()) {
     return false;
   }
 
@@ -329,7 +356,7 @@ bool NeoPMKV::MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
   auto indexer = _indexerList[key.schemaId];
 
   IndexerIterator idxIter = indexer->find(key.primaryKey);
-  if(idxIter == indexer->end()){
+  if (idxIter == indexer->end()) {
     return false;
   }
 
@@ -340,7 +367,6 @@ bool NeoPMKV::MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
 
 bool NeoPMKV::updateValue(IndexerIterator &idxIter, const Key &key,
                           const Value &value) {
-
   PmemAddress pmAddr;
   POINT_PROFILE_START(pmem_timer);
   Status s = _engine_ptr->append(pmAddr, value.c_str(), value.size());

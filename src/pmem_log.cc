@@ -9,6 +9,7 @@
 #include "pmem_log.h"
 #include <bits/stdint-uintn.h>
 #include <fmt/format.h>
+#include "kv_type.h"
 #include "logging.h"
 #include "pmem_engine.h"
 #include "schema.h"
@@ -131,8 +132,16 @@ Status PmemLog::read(PmemAddress readAddr, std::string &value,
   }
   char *valuePtr = _convertToPtr(readAddr);
   ValueReader fieldReader(schemaPtr);
-  fieldReader.ExtractFieldFromFullRow(valuePtr, fieldId, value);
-  return PmemStatuses::S200_OK_Found;
+  if (fieldReader.ExtractRowTypeFromRow(valuePtr) != RowType::PARTIAL_FIELD) {
+    fieldReader.ExtractFieldFromFullRow(valuePtr, fieldId, value);
+    return PmemStatuses::S200_OK_Found;
+  }
+  // not full value , must look for the partial value or look for prev
+  bool containTarget =
+      fieldReader.ExtractFieldFromPartialRow(valuePtr, fieldId, value);
+  if (containTarget == true) return PmemStatuses::S200_OK_Found;
+  PmemAddress prevPmemAddr = fieldReader.ExtractPrevRowFromPartialRow(valuePtr);
+  return this->read(prevPmemAddr, value, schemaPtr, fieldId);
 }
 
 Status PmemLog::seal() {

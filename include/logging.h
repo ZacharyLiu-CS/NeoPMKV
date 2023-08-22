@@ -12,45 +12,42 @@
 #include <gtest/internal/gtest-port.h>
 #include <thread>
 
-#ifdef ENABLE_DEBUG
-#define NKV_LOG_D(output, fmt_str, ...)                                      \
-  do {                                                                       \
-    fmt::print(output,                                                       \
-               FMT_STRING("[{}:{} @{} DEBUG] Thread:[{}] " fmt_str "\n"),    \
-               __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(), \
-               ##__VA_ARGS__);                                               \
+#define NKV_LOG(output, level, fmt_str, ...)                            \
+  do {                                                                  \
+    fmt::print(output,                                                  \
+               FMT_STRING("[{}:{} @{} #"#level"] Thread:[{}] " fmt_str "\n"), \
+               __FILE__, __LINE__, __FUNCTION__,                \
+               std::this_thread::get_id(), ##__VA_ARGS__);              \
   } while (0)
+#define EMPTY(...) \
+  do {             \
+  } while (0)
+
+#if defined(LOG_LEVEL) && (LOG_LEVEL == DEBUG)
+#define NKV_LOG_D(output, fmt_str, ...) \
+  NKV_LOG(output, DEBUG, fmt_str, ##__VA_ARGS__)
+#define NKV_LOG_I(output, fmt_str, ...) \
+  NKV_LOG(output, INFO, fmt_str, ##__VA_ARGS__)
+#define NKV_LOG_E(output, fmt_str, ...) \
+  NKV_LOG(output, ERROR, fmt_str, ##__VA_ARGS__)
+#elif defined(LOG_LEVEL) && (LOG_LEVEL == INFO)
+#define NKV_LOG_D(...) EMPTY(...)
+#define NKV_LOG_I(output, fmt_str, ...) \
+  NKV_LOG(output, INFO, fmt_str, ##__VA_ARGS__)
+#define NKV_LOG_E(output, fmt_str, ...) \
+  NKV_LOG(output, ERROR, fmt_str, ##__VA_ARGS__)
+#elif defined(LOG_LEVEL) && (LOG_LEVEL == ERROR)
+#define NKV_LOG_D(...) EMPTY(...)
+#define NKV_LOG_I(...) EMPTY(...)
+#define NKV_LOG_E(output, fmt_str, ...) \
+  NKV_LOG(output, ERROR, fmt_str, ##__VA_ARGS__)
 #else
-#define NKV_LOG_D(fmt_str, ...) \
-  do {                          \
-  } while (0)
+#define NKV_LOG_D(...) EMPTY(...)
+#define NKV_LOG_I(...) EMPTY(...)
+#define NKV_LOG_E(...) EMPTY(...)
 #endif
 
-#define NKV_LOG_I(output, fmt_str, ...)                                      \
-  do {                                                                       \
-    fmt::print(output,                                                       \
-               FMT_STRING("[{}:{} @{} INFO] Thread:[{}] " fmt_str "\n"),     \
-               __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(), \
-               ##__VA_ARGS__);                                               \
-  } while (0)
-#define NKV_LOG_E(output, fmt_str, ...)                                      \
-  do {                                                                       \
-    fmt::print(output,                                                       \
-               FMT_STRING("[{}:{} @{} ERROR] Thread:[{}] " fmt_str "\n"),    \
-               __FILE__, __LINE__, __FUNCTION__, std::this_thread::get_id(), \
-               ##__VA_ARGS__);                                               \
-  } while (0)
-
-// #define NKV_LOG_I(fmt_str, ...) \
-//   do {                          \
-//   } while (0)
-
-// #define NKV_LOG_E(fmt_str, ...) \
-//   do {                          \
-//   } while (0)
-
 #ifdef ENABLE_STATISTICS
-
 #define POINT_PROFILE_START(var_name) \
   PointProfiler var_name;             \
   do {                                \

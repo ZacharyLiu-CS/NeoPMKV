@@ -67,16 +67,16 @@ class NeoPMKV {
     }
     outputReadStat();
   }
-
+  // DDL (data definition language)
   SchemaId CreateSchema(vector<SchemaField> fields, uint32_t primarykeyId,
                         string name);
-
+  // DML (data manipulation language)
   Schema *QuerySchema(SchemaId sid);
-
   bool AddColumn(SchemaId sid, SchemaField fieldId);
   bool DeleteColumn(SchemaId sid, SchemaId fieldId);
   bool DeleteColumn(SchemaId sid, string fieldName);
 
+  // DQL (data query language)
   bool MultiPartialGet(Key &key, vector<Value> &value,
                        const vector<uint32_t> fields);
   bool PartialGet(Key &key, Value &value, uint32_t field);

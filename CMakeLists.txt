@@ -11,18 +11,35 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if( CMAKE_BUILD_TYPE STREQUAL "Debug" )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
-  add_compile_definitions(ENABLE_DEBUG)
-else( CMAKE_BUILD_TYPE STREQUAL "Release" )
+elseif( CMAKE_BUILD_TYPE STREQUAL "Release" )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -fopenmp")
 endif( CMAKE_BUILD_TYPE STREQUAL "Debug" )
 
-option(BREAKDOWN "Enable PBRB Breakdown" ON)
+# Set default log level to DEBUG if not specified
+set(LOG_LEVEL "DEBUG" CACHE STRING "Log level") 
+
+# Allow user to override default via cmake -DLOG_LEVEL=<level>
+set_property(CACHE LOG_LEVEL PROPERTY STRINGS "DEBUG" "INFO" "ERROR" "DISABLE")
+
+message(STATUS "Using log level: ${LOG_LEVEL}")
+# Add compile definition based on log level
+if(LOG_LEVEL STREQUAL "DEBUG")
+  add_compile_definitions(LOG_LEVEL DEBUG)
+elseif(LOG_LEVEL STREQUAL "INFO") 
+  add_compile_definitions(LOG_LEVEL INFO)
+elseif(LOG_LEVEL STREQUAL "ERROR")
+  add_compile_definitions(LOG_LEVEL ERROR) 
+elseif(LOG_LEVEL STREQUAL "DISABLE")
+  add_compile_definitions(LOG_LEVEL DISABLE)
+endif(LOG_LEVEL STREQUAL "DEBUG")
+
+option(BREAKDOWN "Enable PBRB Breakdown" OFF)
 if(BREAKDOWN)
   message("Enable PBRB Breakdown!")
   add_compile_definitions(ENABLE_BREAKDOWN)
 endif(BREAKDOWN)
 
-option(STATISTICS "Enable Statistic of pmem and pbrb" ON)
+option(STATISTICS "Enable Statistic of pmem and pbrb" OFF)
 if(STATISTICS)
   message("Enable NeoPMKV Statistic!")
   add_compile_definitions(ENABLE_STATISTICS)

@@ -132,7 +132,7 @@ Status PmemLog::read(PmemAddress readAddr, std::string &value,
   }
   char *valuePtr = _convertToPtr(readAddr);
   ValueReader fieldReader(schemaPtr);
-  if (fieldReader.ExtractRowTypeFromRow(valuePtr) != RowType::PARTIAL_FIELD) {
+  if (fieldReader.ExtractRowTypeFromRow(valuePtr) == RowType::FULL_DATA) {
     fieldReader.ExtractFieldFromFullRow(valuePtr, fieldId, value);
     return PmemStatuses::S200_OK_Found;
   }

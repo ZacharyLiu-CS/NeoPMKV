@@ -8,7 +8,6 @@
 #pragma once
 #include <bits/stdint-uintn.h>
 #include <fmt/format.h>
-#include <queue>
 #include <sys/types.h>
 #include <atomic>
 #include <cassert>
@@ -16,6 +15,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -31,9 +31,9 @@ class Schema;
 class MemPool;
 
 using Value = std::string;
+using std::queue;
 using std::string;
 using std::vector;
-using std::queue;
 
 class SchemaParser {
  public:
@@ -60,11 +60,13 @@ class SchemaParser {
   bool FreeTwoPartRow(Schema *schemaPtr, char *value);
 
   // combine the fixed part and variable part, and move the data into a new one
-  static bool ParseFromTwoPartToSeq(Schema *schemaPtr, string &seqValue,
+  static bool ParseFromTwoPartToSeq(Schema *schemaPtr, Value &seqValue,
                                     char *rowPtr);
-  // the partial values : front [ new partial value1, new partial value2 , old full value3 ] end
-  static bool MergePartialUpdateToFullRow(Schema *schemaPtr, string &seqValue,
+  // the partial values : front [ new partial value1, new partial value2 , old
+  // full value3 ] end
+  static bool MergePartialUpdateToFullRow(Schema *schemaPtr, Value &seqValue,
                                           vector<Value> &partialValues);
+
 
  private:
   MemPool *_globalPool = nullptr;
@@ -83,11 +85,11 @@ class ValueReader {
   bool ExtractFieldFromPmemRow(PmemAddress rowPtr, PmemEngine *enginePtr,
                                uint32_t fieldId, Value &value);
 
-  RowType ExtractRowTypeFromRow(char*rowPtr);
+  RowType ExtractRowTypeFromRow(char *rowPtr);
 
-  PmemAddress ExtractPrevRowFromPartialRow(char*rowPtr);
+  PmemAddress ExtractPrevRowFromPartialRow(char *rowPtr);
 
-  SchemaVer ExtractVersionFromRow(char*rowPtr);
+  SchemaVer ExtractVersionFromRow(char *rowPtr);
 
  private:
   Schema *_schemaPtr = nullptr;

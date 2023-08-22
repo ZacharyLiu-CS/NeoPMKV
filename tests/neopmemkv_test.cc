@@ -63,7 +63,7 @@ class NeoPMKVTest : public testing::Test {
 
   void PartialUpdateData(uint32_t i, Value &fieldValue, uint32_t fieldId) {
     auto key = BuildKey(i, sid);
-    neopmkv_->PartialUpdate(key, fieldValue, 2);
+    neopmkv_->PartialUpdate(key, fieldValue, fieldId);
   }
 
   Value GetData(uint32_t i) {
@@ -121,13 +121,43 @@ TEST_F(NeoPMKVTest, DisablePBRBTest) {
   }
   seed = 95465;
   for (uint32_t i = 0; i < count; i++) {
-    auto ev = BuildFieldValue(i + seed, 2, 16);
+    auto ov0 = PartialGetData(i, 0);
+    auto ov1 = PartialGetData(i, 1);
+    auto ov2 = PartialGetData(i, 2);
+
+    auto ev0 = BuildFieldValue(i + seed, 0, 8);
+    auto ev1 = BuildFieldValue(i + seed, 1, 16);
+    auto ev2 = BuildFieldValue(i + seed, 2, 16);
+
     // std::cout << ev << std::endl;
-    PartialUpdateData(i, ev, 2);
-    auto pv = PartialGetData(i, 2);
+    PartialUpdateData(i, ev0, 0);
+    PartialUpdateData(i, ev1, 1);
+    PartialUpdateData(i, ev2, 2);
+    auto pv0 = PartialGetData(i, 0);
+    auto pv1 = PartialGetData(i, 1);
+    auto pv2 = PartialGetData(i, 2);
+
+    PartialUpdateData(i, ev0, 0);
+    PartialUpdateData(i, ev1, 1);
+    PartialUpdateData(i, ev2, 2);
+
+    // std::cout << "key " << i << " before " << ov0 << std::endl;
+    // std::cout << "             " << ov1 << std::endl;
+    // std::cout << "             " << ov2 << std::endl;
+
+    // std::cout << "update data  " << ev0 << std::endl;
+    // std::cout << "             " << ev1 << std::endl;
+    // std::cout << "             " << ev2 << std::endl;
+
+    // std::cout << "read  data   " << pv0 << std::endl;
+    // std::cout << "             " << pv1 << std::endl;
+    // std::cout << "             " << pv2 << std::endl;
+
     auto fv = GetData(i);
     // std::cout << fv << std::endl;
-    EXPECT_STREQ(ev.data(), pv.data());
+    EXPECT_STREQ(ev0.data(), pv0.data());
+    EXPECT_STREQ(ev1.data(), pv1.data());
+    EXPECT_STREQ(ev2.data(), pv2.data());
   }
 }
 

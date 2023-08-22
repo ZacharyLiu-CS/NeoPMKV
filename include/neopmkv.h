@@ -97,17 +97,19 @@ class NeoPMKV {
   void outputReadStat();
 
  private:
-  bool putValue(const Key &key, const Value &value);
-  bool updateValue(IndexerIterator &idxIter, const Key &key,
-                   const Value &value);
-  bool getValueFromIndexIterator(IndexerIterator &idxIter,
-                                 shared_ptr<IndexerT> indexer,
-                                 SchemaId schemaid, vector<Value> &value,
-                                 vector<uint32_t> &fields);
-  bool getValueFromIndexIterator(IndexerIterator &idxIter,
-                                 shared_ptr<IndexerT> indexer,
-                                 SchemaId schemaid, Value &value,
-                                 uint32_t fieldId = UINT32_MAX);
+  bool putNewValue(const Key &key, const Value &value);
+  bool putExistedValue(IndexerIterator &idxIter, ValuePtr *vPtr, const Key &key,
+                       const Value &value, bool isPartial);
+  bool getValueHelper(IndexerIterator &idxIter, shared_ptr<IndexerT> indexer,
+                      SchemaId schemaid, vector<Value> &value,
+                      vector<uint32_t> &fields);
+  bool getValueHelper(IndexerIterator &idxIter, shared_ptr<IndexerT> indexer,
+                      SchemaId schemaid, Value &value,
+                      uint32_t fieldId = UINT32_MAX);
+  bool updateWhenReadHelper(IndexerIterator &idxIter,
+                            shared_ptr<IndexerT> indexer, const Key &key,
+                            Value &newPartialValue);
+
   // use store the key -> valueptr
   IndexerList _indexerList;
   // use to allocate schema

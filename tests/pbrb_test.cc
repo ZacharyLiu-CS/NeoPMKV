@@ -52,18 +52,18 @@ class PBRBTest : public testing::Test {
   void CreateSchema1() {
     Schema schema1 = _schemaAllocator.CreateSchema("schema1", 0, fields1);
     _sUMap.addSchema(schema1);
-    _pbrbPtr->createCacheForSchema(schema1.schemaId, schema1.version);
-    _indexerList.insert({schema1.schemaId, std::make_shared<IndexerT>()});
+    _pbrbPtr->createCacheForSchema(schema1.getSchemaId(), schema1.getVersion());
+    _indexerList.insert({schema1.getSchemaId(), std::make_shared<IndexerT>()});
     SchemaParser *parser = new SchemaParser(_memPoolPtr);
-    _sParser.insert({schema1.schemaId, parser});
+    _sParser.insert({schema1.getSchemaId(), parser});
   }
   void CreateSchema2() {
     Schema schema2 = _schemaAllocator.CreateSchema("schema1", 0, fields2);
     _sUMap.addSchema(schema2);
-    _pbrbPtr->createCacheForSchema(schema2.schemaId, schema2.version);
-    _indexerList.insert({schema2.schemaId, std::make_shared<IndexerT>()});
+    _pbrbPtr->createCacheForSchema(schema2.getSchemaId(), schema2.getVersion());
+    _indexerList.insert({schema2.getSchemaId(), std::make_shared<IndexerT>()});
     SchemaParser *parser = new SchemaParser(_memPoolPtr);
-    _sParser.insert({schema2.schemaId, parser});
+    _sParser.insert({schema2.getSchemaId(), parser});
   }
 
   void Clear() {

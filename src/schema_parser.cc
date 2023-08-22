@@ -42,7 +42,7 @@ std::string SchemaParser::ParseFromUserWriteToSeq(
   // do the movement
   char *destPtr = result.data();
   RowMetaPtr(destPtr)->setMeta(contentSize, RowType::FULL_DATA,
-                               schemaPtr->schemaId, schemaPtr->version);
+                               schemaPtr->getSchemaId(), schemaPtr->getVersion());
 
   destPtr = skipRowMeta(destPtr);
   char *startPtr = destPtr;
@@ -103,8 +103,8 @@ string SchemaParser::ParseFromPartialUpdateToRow(Schema *schemaPtr,
                varContentSize);
   RowMetaPtr(value.data())
       ->setMeta(partialMetaSize + fieldsSize + varContentSize,
-                RowType::PARTIAL_FIELD, schemaPtr->schemaId,
-                schemaPtr->version);
+                RowType::PARTIAL_FIELD, schemaPtr->getSchemaId(),
+                schemaPtr->getVersion());
 
   char *pMetaPtr = skipRowMeta(value.data());
   PartialRowMetaPtr(pMetaPtr)->setMeta(pmemAddr, partialMetaSize, fields);
@@ -149,10 +149,10 @@ bool SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
   uint32_t rowVarPartSize = seqValue.size() - rowFixedPartSize;
   RowMetaPtr(seqValue.data())
       ->setMeta(schemaPtr->getAllFieldSize() + rowVarPartSize,
-                RowType::FULL_FIELD, schemaPtr->schemaId, schemaPtr->version);
+                RowType::FULL_FIELD, schemaPtr->getSchemaId(), schemaPtr->getVersion());
 
   char *fieldPtr = skipRowMeta(seqValue.data());
-  if (schemaPtr->hasVariableField == false) {
+  if (schemaPtr->hasVarField() == false) {
     seqValue.resize(rowFixedPartSize);
     return true;
   }
@@ -206,7 +206,7 @@ bool SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
 bool SchemaParser::FreeTwoPartRow(Schema *schemaPtr, char *value) {
   if (RowMetaPtr(value)->getType() != RowType::FULL_FIELD) return false;
 
-  if (schemaPtr->hasVariableField == false) return true;
+  if (schemaPtr->hasVarField() == false) return true;
   uint32_t rowFixedPartSize = schemaPtr->getSize();
   char *fieldPtr = skipRowMeta(value);
   for (auto &i : schemaPtr->fieldsMeta) {

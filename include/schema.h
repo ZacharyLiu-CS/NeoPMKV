@@ -25,8 +25,6 @@
 
 namespace NKV {
 
-using SchemaId = uint16_t;
-using SchemaVer = uint16_t;
 using std::vector;
 
 enum RowType : uint16_t {
@@ -131,11 +129,12 @@ class PartialSchema {
   }
 };
 
-struct Schema {
+class Schema {
+ private:
   // define the schema name
   std::string name;
   SchemaVer version = 0;
-  uint32_t schemaId = ERRMASK;
+  SchemaId schemaId = ERRMASK;
   // the primary key field id
   uint32_t primaryKeyField = 0;
   // define the schema data size
@@ -147,6 +146,10 @@ struct Schema {
   std::vector<SchemaField> fields;
   std::vector<FieldMetaData> fieldsMeta;
 
+  friend class SchemaParser;
+  friend class ValueReader;
+
+ public:
   Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
          std::vector<SchemaField> &fields);
 
@@ -154,7 +157,15 @@ struct Schema {
 
   uint32_t getAllFieldSize() { return allFieldSize; }
 
-  uint32_t getSize() { return size; }
+  std::string getName() const { return name; }
+
+  SchemaId getSchemaId() const { return schemaId; }
+
+  uint32_t getSize() const { return size; }
+
+  uint32_t getVersion() const{return version;}
+
+  bool hasVarField() const { return hasVariableField; }
 
   inline uint32_t getSize(uint32_t fieldId) {
     return fieldsMeta[fieldId].fieldSize;
@@ -197,15 +208,15 @@ class SchemaUMap {
   std::mutex _mutex;
 
  public:
-  void addSchema(Schema schema) {
+  void addSchema(Schema &schema) {
     std::lock_guard<std::mutex> guard(_mutex);
-    _umap.insert({schema.schemaId, schema});
+    _umap.insert({schema.getSchemaId(), schema});
   }
 
-  uint32_t getSchemaID(std::string schemaName) {
+  uint32_t getSchemaID(std::string &schemaName) {
     // std::lock_guard<std::mutex> guard(_mutex);
     for (auto &item : _umap) {
-      if (item.second.name == schemaName) return item.first;
+      if (item.second.getName() == schemaName) return item.first;
     }
     return 0;
   }
@@ -221,54 +232,3 @@ class SchemaUMap {
 };
 
 }  // end of namespace NKV
-
-template <>
-struct fmt::formatter<NKV::Key> {
-  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-    return ctx.begin();
-  }
-
-  // Formats the point p using the parsed format specification (presentation)
-  // stored in this formatter.
-  template <typename FormatContext>
-  auto format(const NKV::Key &key, FormatContext &ctx) const
-      -> decltype(ctx.out()) {
-    // ctx.out() is an output iterator to write to.
-    return fmt::format_to(ctx.out(), "schemaid:{},pkey:{}", key.schemaId,
-                          key.primaryKey);
-  }
-};
-template <>
-struct fmt::formatter<NKV::Value> {
-  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-    return ctx.begin();
-  }
-
-  // Formats the point p using the parsed format specification (presentation)
-  // stored in this formatter.
-  template <typename FormatContext>
-  auto format(const NKV::Value &value, FormatContext &ctx) const
-      -> decltype(ctx.out()) {
-    // ctx.out() is an output iterator to write to.
-    return fmt::format_to(ctx.out(), "{}", value);
-  }
-};
-
-template <>
-struct fmt::formatter<NKV::ValuePtr> {
-  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-    return ctx.begin();
-  }
-
-  // Formats the point p using the parsed format specification (presentation)
-  // stored in this formatter.
-  template <typename FormatContext>
-  auto format(const NKV::ValuePtr &valuePtr, FormatContext &ctx) const
-      -> decltype(ctx.out()) {
-    // ctx.out() is an output iterator to write to.
-    return fmt::format_to(ctx.out(), "Hot: {} PmemAddr: {}, PBRBAddr:{} TS: {}",
-                          valuePtr.isHot(), valuePtr.getPmemAddr(),
-                          (uint64_t)valuePtr.getPBRBAddr(),
-                          valuePtr.getTimestamp());
-  }
-};

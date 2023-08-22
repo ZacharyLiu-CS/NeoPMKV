@@ -190,7 +190,7 @@ BufferPage *PBRB::AllocNewPageForSchema(SchemaId schemaId) {
     NKV_LOG_D(std::cout,
               "Allocated page for schema: {}, page count: {}, time al1: {}, "
               "al2: {}, al3: {}, total: {}",
-              blbs->ownSchema->name, (blbs->curPageNum).load(), al1ns, al2ns,
+              blbs->ownSchema->getName(), (blbs->curPageNum).load(), al1ns, al2ns,
               al3ns, al1ns + al2ns + al3ns);
 
     return newPage;
@@ -321,7 +321,7 @@ std::pair<BufferPage *, RowOffset> PBRB::traverseFindEmptyRow(
       NKV_LOG_E(std::cerr,
                 "[Schema: {}, sid: {}:] blbs->headPage == nullptr, Aborted "
                 "traversing.",
-                blbs->ownSchema->name, blbs->ownSchema->schemaId);
+                blbs->ownSchema->getName(), blbs->ownSchema->getSchemaId());
     }
   }
 
@@ -587,7 +587,7 @@ void PBRB::asyncWriteHandler(decltype(&_asyncThreadPollList) pollList) {
 }
 bool PBRB::dropRow(RowAddr rAddr, Schema *schemaPtr) {
   auto [pagePtr, rowOffset] = findPageAndRowByAddr(rAddr);
-  if (schemaPtr->hasVariableField == true) {
+  if (schemaPtr->hasVarField() == true) {
     SchemaParser *parser = _sParser->operator[](1);
     parser->FreeTwoPartRow(schemaPtr, pagePtr->getValuePtr(rAddr));
   }

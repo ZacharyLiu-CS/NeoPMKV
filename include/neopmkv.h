@@ -72,9 +72,9 @@ class NeoPMKV {
                         string name);
   // DML (data manipulation language)
   Schema *QuerySchema(SchemaId sid);
-  bool AddColumn(SchemaId sid, SchemaField fieldId);
+  bool AddColumn(SchemaId sid, SchemaField &sField);
   bool DeleteColumn(SchemaId sid, SchemaId fieldId);
-  bool DeleteColumn(SchemaId sid, string fieldName);
+  
 
   // DQL (data query language)
   bool MultiPartialGet(Key &key, vector<Value> &value,
@@ -109,6 +109,7 @@ class NeoPMKV {
   bool updateWhenReadHelper(IndexerIterator &idxIter,
                             shared_ptr<IndexerT> indexer, const Key &key,
                             Value &newPartialValue);
+  bool dropSchemaVersion(SchemaId sid, SchemaVer version);
 
   // use store the key -> valueptr
   IndexerList _indexerList;

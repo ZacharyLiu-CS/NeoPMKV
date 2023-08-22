@@ -25,24 +25,33 @@ namespace NKV {
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
 using RowAddr = void *;
-const uint32_t ERRMASK = 1 << 31;
+const uint16_t ERRMASK = UINT16_MAX;
+using SchemaId = uint16_t;
+using SchemaVer = uint16_t;
 
 struct Key {
-  uint32_t schemaId;
+  SchemaId schemaId;
+  SchemaVer version;
   uint64_t primaryKey;
 
-  Key(uint32_t schemaId, uint64_t pkValue) {
-    this->schemaId = schemaId;
+  Key( SchemaId sid, uint64_t pkValue, SchemaVer ver = 0) {
+    schemaId = sid;
     primaryKey = pkValue;
+    version = ver;
   }
 
   bool operator<(const Key &k) const {
-    if (this->schemaId < k.schemaId)
-      return true;
-    else if (this->schemaId == k.schemaId && this->primaryKey < k.primaryKey)
-      return true;
-    return false;
+    if (this->schemaId < k.schemaId) return true;
+    if (this->schemaId > k.schemaId) return false;
+    if (this->primaryKey < k.primaryKey) return true;
+    if (this->primaryKey > k.primaryKey) return false;
+    if (this->version < k.version) return true;
+    if (this->version > k.version) return false;
+    return true;
   }
+  SchemaId getSchemaId()const{return schemaId;}
+  SchemaVer getVersion()const{return version;}
+  uint64_t getPrimaryKey()const{return primaryKey;}
 };
 
 using Value = std::string;
@@ -83,10 +92,10 @@ class ValuePtr {
   void setPartialColdPmemAddr(PmemAddress pmAddr,
                               TimeStamp newTS = TimeStamp());
 
-  uint8_t getPrevItemCount() {
+  uint8_t getPrevItemCount() const {
     return _prevItemCount.load(std::memory_order_relaxed);
   }
-  bool isFullRecord(){
+  bool isFullRecord() const {
     return _prevItemCount.load(std::memory_order_relaxed) == 0;
   }
 
@@ -98,3 +107,55 @@ class ValuePtr {
 };
 
 }  // namespace NKV
+
+template <>
+struct fmt::formatter<NKV::Key> {
+  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+    return ctx.begin();
+  }
+
+  // Formats the point p using the parsed format specification (presentation)
+  // stored in this formatter.
+  template <typename FormatContext>
+  auto format(const NKV::Key &key, FormatContext &ctx) const
+      -> decltype(ctx.out()) {
+    // ctx.out() is an output iterator to write to.
+    return fmt::format_to(ctx.out(), "schemaid:{}, pkey:{}, version:{} ",
+                          key.schemaId, key.primaryKey, key.version);
+  }
+};
+template <>
+struct fmt::formatter<NKV::Value> {
+  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+    return ctx.begin();
+  }
+
+  // Formats the point p using the parsed format specification (presentation)
+  // stored in this formatter.
+  template <typename FormatContext>
+  auto format(const NKV::Value &value, FormatContext &ctx) const
+      -> decltype(ctx.out()) {
+    // ctx.out() is an output iterator to write to.
+    return fmt::format_to(ctx.out(), "{}", value);
+  }
+};
+
+template <>
+struct fmt::formatter<NKV::ValuePtr> {
+  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+    return ctx.begin();
+  }
+
+  // Formats the point p using the parsed format specification (presentation)
+  // stored in this formatter.
+  template <typename FormatContext>
+  auto format(const NKV::ValuePtr &valuePtr, FormatContext &ctx) const
+      -> decltype(ctx.out()) {
+    // ctx.out() is an output iterator to write to.
+    return fmt::format_to(
+        ctx.out(), "Hot: {} PmemAddr: {}, PBRBAddr:{} TS: {} PrevCount: {}",
+        valuePtr.isHot(), valuePtr.getPmemAddr(),
+        (uint64_t)valuePtr.getPBRBAddr(), valuePtr.getTimestamp(),
+        valuePtr.getPrevItemCount());
+  }
+};

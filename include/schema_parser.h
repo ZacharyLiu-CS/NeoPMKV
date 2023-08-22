@@ -22,13 +22,13 @@
 #include <unordered_map>
 #include <vector>
 #include "kv_type.h"
-#include "pmem_engine.h"
 #include "schema.h"
 
 namespace NKV {
 
 class Schema;
 class MemPool;
+class PmemEngine;
 
 using Value = std::string;
 using std::queue;

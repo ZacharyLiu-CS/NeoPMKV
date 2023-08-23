@@ -14,7 +14,7 @@ mount pmem device to /mnt/pmem0
 ## Build
 ```
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release/Debug -DBREAKDOWN=OFF/ON -DSTATISTICS=ON && make -j
+cmake .. -DCMAKE_BUILD_TYPE=Release/Debug -DBREAKDOWN=OFF/ON -DSTATISTICS=ON -DLOG_LEVEL=DEBUG/INFO/ERROR/DISABLE && make -j
 ```
 
 ## Test

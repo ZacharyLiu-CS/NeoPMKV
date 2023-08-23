@@ -34,12 +34,13 @@ class NeoPMKV {
   NeoPMKV(string db_path = "/mnt/pmem0/tmp-neopmkv",
           uint64_t chunk_size = 16ULL << 20, uint64_t db_size = 16ULL << 30,
           bool enable_pbrb = false, bool async_pbrb = false,
-          bool enable_async_gc = false, uint32_t max_page_num = 1ull << 18,
-          uint64_t rw_mirco = 2000, double gc_threshold = 0.7,
-          uint64_t gc_inteval_micro = 2000, double hit_threshold = 0.3) {
+          bool enable_async_gc = false, bool in_place_update_opt = false,
+          uint32_t max_page_num = 1ull << 18, uint64_t rw_mirco = 2000,
+          double gc_threshold = 0.7, uint64_t gc_inteval_micro = 2000,
+          double hit_threshold = 0.3) {
     _enable_pbrb = enable_pbrb;
     _async_pbrb = async_pbrb;
-
+    _in_place_update_opt = in_place_update_opt;
     // initialize the pmemlog
     _engine_config.chunk_size = chunk_size;
     _engine_config.engine_capacity = db_size;
@@ -72,9 +73,8 @@ class NeoPMKV {
                         string name);
   // DML (data manipulation language)
   Schema *QuerySchema(SchemaId sid);
-  bool AddColumn(SchemaId sid, SchemaField &sField);
-  bool DeleteColumn(SchemaId sid, SchemaId fieldId);
-  
+  bool AddField(SchemaId sid, SchemaField &sField);
+  bool DeleteField(SchemaId sid, SchemaId fieldId);
 
   // DQL (data query language)
   bool MultiPartialGet(Key &key, vector<Value> &value,
@@ -106,9 +106,8 @@ class NeoPMKV {
   bool getValueHelper(IndexerIterator &idxIter, shared_ptr<IndexerT> indexer,
                       SchemaId schemaid, Value &value,
                       uint32_t fieldId = UINT32_MAX);
-  bool updateWhenReadHelper(IndexerIterator &idxIter,
-                            shared_ptr<IndexerT> indexer, const Key &key,
-                            Value &newPartialValue);
+  bool updateFullValue(IndexerIterator &idxIter, shared_ptr<IndexerT> indexer,
+                       const Key &key, Value &newPartialValue);
   bool dropSchemaVersion(SchemaId sid, SchemaVer version);
 
   // use store the key -> valueptr
@@ -121,6 +120,8 @@ class NeoPMKV {
   SchemaParserMap _sParser;
 
   MemPool *_memPoolPtr = nullptr;
+
+  bool _in_place_update_opt = false;
 
   // pbrb part
   bool _enable_pbrb = false;

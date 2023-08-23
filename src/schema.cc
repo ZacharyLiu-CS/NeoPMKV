@@ -15,6 +15,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include "field_type.h"
 #include "mempool.h"
@@ -56,32 +57,57 @@ PartialSchema::PartialSchema(Schema *fullSchemaPtr, uint8_t *fields,
 Schema::Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
                std::vector<SchemaField> &fields)
     : name(name),
-      version(0),
+      latestVersion(0),
       schemaId(schemaId),
       primaryKeyField(primaryKeyField),
       fields(fields) {
   size += ROW_META_HEAD_SIZE;
-  for (auto i : fields) {
-    fieldsMeta.push_back(FieldMetaData());
-    auto &field_meta = fieldsMeta.back();
-    field_meta.fieldSize = i.size;
-    field_meta.fieldOffset = size;
-    field_meta.isNullable = false;
-    field_meta.isVariable = false;
-    size += i.size;
-    allFieldSize += i.size;
-    if (i.type == FieldType::VARSTR) {
+  for (auto &field : fields) {
+    bool isVariableField = field.type == FieldType::VARSTR;
+    FieldMetaData fMeta = FieldMetaData{.fieldSize = field.size,
+                                        .fieldOffset = this->size,
+                                        .isDeleted = false,
+                                        .isNullable = false,
+                                        .isVariable = isVariableField};
+    if (isVariableField == true) {
       hasVariableField = true;
-      field_meta.isVariable = true;
+    }
+    this->fieldsMeta.push_back(fMeta);
+    this->size += field.size;
+    allFieldSize += field.size;
+    if (field.type == FieldType::VARSTR) {
+      hasVariableField = true;
     }
   }
-}
-uint32_t Schema::getFieldId(const std::string &fieldName) {
-  uint32_t fieldId = 0;
-  for (auto &i : fields) {
-    if (i.name == fieldName) break;
-    fieldId += 1;
+  uint32_t fieldsCount = fields.size();
+  for (uint32_t sid = 0; sid < fieldsCount; sid++) {
+    nameMap.insert({fields[sid].name, sid});
   }
-  return fieldId;
+}
+bool Schema::addFieldImpl(SchemaField &&field) {
+  fields.push_back(field);
+  bool isVariableField = field.type == FieldType::VARSTR;
+  FieldMetaData fMeta = FieldMetaData{.fieldSize = field.size,
+                                      .fieldOffset = this->size,
+                                      .isDeleted = false,
+                                      .isNullable = false,
+                                      .isVariable = isVariableField};
+  if (isVariableField == true) {
+    hasVariableField = true;
+  }
+  fieldsMeta.push_back(fMeta);
+  return true;
+}
+
+bool Schema::deleteFieldImpl(SchemaId sid) {
+  deletedField.insert(sid);
+  fieldsMeta[sid].isDeleted = true;
+  return true;
+}
+bool Schema::addField(const SchemaField &field) { return true; }
+
+bool Schema::deleteField(SchemaId sid) { return true; }
+uint32_t Schema::getFieldId(const std::string &fieldName) {
+  return nameMap[fieldName];
 }
 }  // end of namespace NKV

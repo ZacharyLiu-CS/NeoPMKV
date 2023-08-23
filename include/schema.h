@@ -11,8 +11,10 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -109,6 +111,7 @@ struct SchemaField {
 struct FieldMetaData {
   uint32_t fieldSize;
   uint32_t fieldOffset;
+  bool isDeleted;
   bool isNullable;
   bool isVariable;
 };
@@ -133,7 +136,7 @@ class Schema {
  private:
   // define the schema name
   std::string name;
-  SchemaVer version = 0;
+  SchemaVer latestVersion = 0;
   SchemaId schemaId = ERRMASK;
   // the primary key field id
   uint32_t primaryKeyField = 0;
@@ -145,15 +148,28 @@ class Schema {
   bool hasVariableField = false;
   std::vector<SchemaField> fields;
   std::vector<FieldMetaData> fieldsMeta;
+  std::map<std::string, SchemaId> nameMap;
+
+  std::set<SchemaId> deletedField;
+  std::set<SchemaId> addedField;
 
   friend class SchemaParser;
   friend class ValueReader;
+
+ private:
+  bool addFieldImpl(SchemaField &&field);
+
+  bool deleteFieldImpl(SchemaId sid);
 
  public:
   Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
          std::vector<SchemaField> &fields);
 
   Schema buildPartialSchema(PartialRowMeta *partialMetaPtr);
+
+  bool addField(const SchemaField &field);
+
+  bool deleteField(SchemaId sid);
 
   uint32_t getAllFieldSize() { return allFieldSize; }
 
@@ -163,7 +179,7 @@ class Schema {
 
   uint32_t getSize() const { return size; }
 
-  uint32_t getVersion() const{return version;}
+  uint32_t getVersion() const { return latestVersion; }
 
   bool hasVarField() const { return hasVariableField; }
 

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <mutex>
 #include "buffer_page.h"
+#include "field_type.h"
 #include "kv_type.h"
 #include "logging.h"
 #include "pbrb.h"
@@ -33,10 +34,14 @@ SchemaId NeoPMKV::CreateSchema(vector<SchemaField> fields,
 }
 // DML (data manipulation language)
 Schema *NeoPMKV::QuerySchema(SchemaId sid) { return _sMap.find(sid); }
-bool NeoPMKV::AddColumn(SchemaId sid, SchemaField & sField) {
-
+bool NeoPMKV::AddField(SchemaId sid, SchemaField &sField) {
+  Schema *schemaPtr = _sMap.find(sid);
+  return schemaPtr->addField(sField);
 }
-bool NeoPMKV::DeleteColumn(SchemaId sid, SchemaId fieldId) {}
+bool NeoPMKV::DeleteField(SchemaId sid, SchemaId fieldId) {
+  Schema *schemaPtr = _sMap.find(sid);
+  return schemaPtr->deleteField(fieldId);
+}
 
 bool NeoPMKV::getValueHelper(IndexerIterator &idxIter,
                              shared_ptr<IndexerT> indexer, SchemaId schemaid,
@@ -85,6 +90,8 @@ bool NeoPMKV::getValueHelper(IndexerIterator &idxIter,
       }
       allValues.push_back(v);
       SchemaParser::MergePartialUpdateToFullRow(schemaPtr, value, allValues);
+    } else {
+      value.assign(v);
     }
     assert(s.is2xxOK());
   }
@@ -198,9 +205,9 @@ bool NeoPMKV::getValueHelper(IndexerIterator &idxIter,
                       pbrb_timer.duration());
   return true;
 }
-bool NeoPMKV::updateWhenReadHelper(IndexerIterator &idxIter,
-                                   shared_ptr<IndexerT> indexer, const Key &key,
-                                   Value &newPartialValue) {
+bool NeoPMKV::updateFullValue(IndexerIterator &idxIter,
+                              shared_ptr<IndexerT> indexer, const Key &key,
+                              Value &newPartialValue) {
   ValuePtr &vPtr = idxIter->second;
   auto [hotStatus, oldTS] = vPtr.getHotStatus();
 
@@ -219,8 +226,8 @@ bool NeoPMKV::updateWhenReadHelper(IndexerIterator &idxIter,
 
     POINT_PROFILE_START(_timer);
 
-    bool status = _pbrb->read(oldTS, newTS, vPtr.getPBRBAddr(), key.getSchemaId(),
-                              oldFullValues.back(), &vPtr);
+    bool status = _pbrb->read(oldTS, newTS, vPtr.getPBRBAddr(),
+                              key.getSchemaId(), oldFullValues.back(), &vPtr);
     POINT_PROFILE_END(_timer);
     PROFILER_ATMOIC_ADD(_durationStat.pbrbReadCount, 1);
     PROFILER_ATMOIC_ADD(_durationStat.pbrbReadTimeNanoSecs, _timer.duration());
@@ -298,7 +305,8 @@ bool NeoPMKV::PartialGet(Key &key, Value &value, uint32_t field) {
   // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
   //           idxIter->second);
   POINT_PROFILE_START(get_timer);
-  bool status = getValueHelper(idxIter, indexer, key.getSchemaId(), value, field);
+  bool status =
+      getValueHelper(idxIter, indexer, key.getSchemaId(), value, field);
 
   POINT_PROFILE_END(get_timer);
   PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorCount, 1);
@@ -330,7 +338,8 @@ bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
   // NKV_LOG_I(std::cout, "key: {} value: {} valuePtr: {}", key, value,
   //           idxIter->second);
   POINT_PROFILE_START(get_timer);
-  bool status = getValueHelper(idxIter, indexer, key.getSchemaId(), value, fields);
+  bool status =
+      getValueHelper(idxIter, indexer, key.getSchemaId(), value, fields);
 
   POINT_PROFILE_END(get_timer);
   PROFILER_ATMOIC_ADD(_durationStat.GetValueFromIteratorCount, 1);
@@ -346,8 +355,8 @@ bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
 
 bool NeoPMKV::Put(const Key &key, vector<Value> &fieldList) {
   Schema *schemaPtr = _sMap.find(key.getSchemaId());
-  std::string value =
-      _sParser[key.getSchemaId()]->ParseFromUserWriteToSeq(schemaPtr, fieldList);
+  std::string value = _sParser[key.getSchemaId()]->ParseFromUserWriteToSeq(
+      schemaPtr, fieldList);
   return putNewValue(key, value);
 }
 
@@ -400,13 +409,27 @@ bool NeoPMKV::PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId) {
     return false;
   }
   ValuePtr *vPtr = &idxIter->second;
+  PmemAddress oldPmemAddr = vPtr->getPmemAddr();
+
   std::string pValue = _sParser[key.getSchemaId()]->ParseFromPartialUpdateToRow(
       schemaPtr, vPtr->getPmemAddr(), valueList, fieldList);
   if (vPtr->getPrevItemCount() <= 3) {
-    return putExistedValue(idxIter, vPtr, key, pValue, true);
+    auto s = putExistedValue(idxIter, vPtr, key, pValue, true);
+    if (s == false) return s;
+    if (_in_place_update_opt == false) return true;
+    // now we can do the in-place-update optimization
+    if (schemaPtr->getFieldType(fieldId) == FieldType::VARSTR) {
+      return true;
+    }
+    auto iOffset = schemaPtr->getPmemOffset(fieldId);
+    auto iSize = fieldValue.size();
+    if (iSize > schemaPtr->getSize(fieldId))
+      iSize = schemaPtr->getSize(fieldId);
+    _engine_ptr->write(oldPmemAddr + iOffset, fieldValue.data(), iSize);
+    vPtr->setFullColdPmemAddr(oldPmemAddr);
   }
 
-  return updateWhenReadHelper(idxIter, indexer, key, pValue);
+  return updateFullValue(idxIter, indexer, key, pValue);
 }
 
 bool NeoPMKV::MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
@@ -420,12 +443,31 @@ bool NeoPMKV::MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
   }
 
   ValuePtr *vPtr = &idxIter->second;
+  PmemAddress oldPmemAddr = vPtr->getPmemAddr();
+
   std::string pValue = _sParser[key.getSchemaId()]->ParseFromPartialUpdateToRow(
       schemaPtr, vPtr->getPmemAddr(), fieldValues, fields);
   if (vPtr->getPrevItemCount() <= 3) {
-    return putExistedValue(idxIter, vPtr, key, pValue, true);
+    bool s = putExistedValue(idxIter, vPtr, key, pValue, true);
+    if (s == false) return s;
+    if (_in_place_update_opt == false) return true;
+    // now we can do the in-place-update optimization
+    for (auto i : fields) {
+      if (schemaPtr->getFieldType(i) == FieldType::VARSTR) {
+        return true;
+      }
+    }
+    for (uint32_t i = 0; i < fields.size(); i++) {
+      auto iFieldId = fields[i];
+      auto iOffset = schemaPtr->getPmemOffset(iFieldId);
+      auto iSize = fieldValues[i].size();
+      if (iSize > schemaPtr->getSize(iFieldId))
+        iSize = schemaPtr->getSize(iFieldId);
+      _engine_ptr->write(oldPmemAddr + iOffset, fieldValues[i].data(), iSize);
+    }
+    vPtr->setFullColdPmemAddr(oldPmemAddr);
   }
-  return updateWhenReadHelper(idxIter, indexer, key, pValue);
+  return updateFullValue(idxIter, indexer, key, pValue);
 }
 
 bool NeoPMKV::putExistedValue(IndexerIterator &idxIter, ValuePtr *vPtr,
@@ -448,7 +490,8 @@ bool NeoPMKV::putExistedValue(IndexerIterator &idxIter, ValuePtr *vPtr,
   // status is true means insert success, we don't have the kv before
   // status is false means having the old kv
   if (_enable_pbrb == true && idxIter->second.isHot() == true) {
-    _pbrb->dropRow(idxIter->second.getPBRBAddr(), _sMap.find(key.getSchemaId()));
+    _pbrb->dropRow(idxIter->second.getPBRBAddr(),
+                   _sMap.find(key.getSchemaId()));
   }
   if (isPartial == true) {
     vPtr->setPartialColdPmemAddr(pmAddr, putTs);
@@ -467,7 +510,8 @@ bool NeoPMKV::Remove(Key &key) {
   }
   bool isHot = idxIter->second.isHot();
   if (isHot) {
-    _pbrb->dropRow(idxIter->second.getPBRBAddr(), _sMap.find(key.getSchemaId()));
+    _pbrb->dropRow(idxIter->second.getPBRBAddr(),
+                   _sMap.find(key.getSchemaId()));
   }
   indexer->unsafe_erase(idxIter);
   return true;

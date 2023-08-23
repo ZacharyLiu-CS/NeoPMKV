@@ -85,11 +85,11 @@ class NeoPMKVTest : public testing::Test {
     return neopmkv_->Remove(key);
   }
 
-  void SetNeoPMKV(bool enablePBRB = false, bool asyncPBRB = false) {
+  void SetNeoPMKV(bool enablePBRB = false, bool asyncPBRB = false, bool partialUpdateOpt = false) {
     if (neopmkv_ != nullptr) delete neopmkv_;
     if (neopmkv_ == nullptr) {
-      neopmkv_ =
-          new NKV::NeoPMKV(db_path, chunk_size, db_size, enablePBRB, asyncPBRB);
+      neopmkv_ = new NKV::NeoPMKV(db_path, chunk_size, db_size, enablePBRB,
+                                  asyncPBRB, true, partialUpdateOpt);
     }
     sid = neopmkv_->CreateSchema(fields, 0, "test1");
   }
@@ -108,7 +108,7 @@ class NeoPMKVTest : public testing::Test {
 };
 
 TEST_F(NeoPMKVTest, DisablePBRBTest) {
-  SetNeoPMKV(false, false);
+  SetNeoPMKV(false, false, true);
   uint32_t count = 5;
   uint32_t seed = 84987;
   for (uint32_t i = 0; i < count; i++) {
@@ -154,7 +154,7 @@ TEST_F(NeoPMKVTest, DisablePBRBTest) {
     // std::cout << "             " << pv2 << std::endl;
 
     auto fv = GetData(i);
-    // std::cout << fv << std::endl;
+    // std::cout << "fv data: " << fv << std::endl;
     EXPECT_STREQ(ev0.data(), pv0.data());
     EXPECT_STREQ(ev1.data(), pv1.data());
     EXPECT_STREQ(ev2.data(), pv2.data());
@@ -192,6 +192,7 @@ TEST_F(NeoPMKVTest, ASYNCPBRBTest) {
   uint32_t seed = 84987;
   for (uint32_t i = 0; i < count; i++) {
     PrepareData(i, seed);
+    GetData(i);
   }
   for (uint32_t i = 0; i < count; i++) {
     auto ev = BuildFieldValue(i + seed, 2, 16);

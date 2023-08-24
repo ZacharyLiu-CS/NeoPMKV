@@ -40,7 +40,7 @@ bool NeoPMKV::AddField(SchemaId sid, SchemaField &sField) {
 }
 bool NeoPMKV::DeleteField(SchemaId sid, SchemaId fieldId) {
   Schema *schemaPtr = _sMap.find(sid);
-  return schemaPtr->deleteField(fieldId);
+  return schemaPtr->dropField(fieldId);
 }
 
 bool NeoPMKV::getValueHelper(IndexerIterator &idxIter,

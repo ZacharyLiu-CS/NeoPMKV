@@ -116,15 +116,15 @@ bool Schema::addFieldImpl(SchemaField &&field) {
   return true;
 }
 
-bool Schema::deleteFieldImpl(SchemaId sid) {
-  std::lock_guard<std::mutex> _deleteField(schemaMutex);
+bool Schema::dropFieldImpl(SchemaId sid) {
+  std::lock_guard<std::mutex> _dropField(schemaMutex);
   deletedField.insert(sid);
   fieldsMeta[sid].isDeleted = true;
   return true;
 }
 bool Schema::addField(const SchemaField &field) { return true; }
 
-bool Schema::deleteField(SchemaId sid) { return true; }
+bool Schema::dropField(SchemaId sid) { return true; }
 uint32_t Schema::getFieldId(const std::string &fieldName) {
   return nameMap[fieldName];
 }

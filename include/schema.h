@@ -160,7 +160,7 @@ class Schema {
  private:
   bool addFieldImpl(SchemaField &&field);
 
-  bool deleteFieldImpl(SchemaId sid);
+  bool dropFieldImpl(SchemaId sid);
 
  public:
   Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
@@ -172,7 +172,7 @@ class Schema {
 
   bool addField(const SchemaField &field);
 
-  bool deleteField(SchemaId sid);
+  bool dropField(SchemaId sid);
 
   uint32_t getAllFieldSize() { return allFieldSize; }
 

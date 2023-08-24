@@ -15,12 +15,7 @@ AsyncBufferEntry::AsyncBufferEntry(uint32_t entry_size)
   _entry_content.resize(_entry_size);
   _entryReady.store(false, std::memory_order_release);
 }
-bool AsyncBufferEntry::getContentReady() {
-  return _entryReady.load(std::memory_order_acquire);
-}
-void AsyncBufferEntry::consumeContent() {
-  _entryReady.store(false, std::memory_order_release);
-}
+
 bool AsyncBufferEntry::copyContent(TimeStamp oldTS, TimeStamp newTS,
                                    IndexerIterator iter, const Value &src) {
   if (_entryReady.load(std::memory_order_acquire) == false) {
@@ -28,6 +23,7 @@ bool AsyncBufferEntry::copyContent(TimeStamp oldTS, TimeStamp newTS,
     _newTS = newTS;
     _iter = iter;
     memcpy((char *)_entry_content.data(), src.c_str(), _entry_size);
+    // _entry_content.assign(src);
     _entryReady.store(true, std::memory_order_release);
     return true;
   }

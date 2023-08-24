@@ -152,6 +152,7 @@ class Schema {
 
   std::set<SchemaId> deletedField;
   std::set<SchemaId> addedField;
+  std::mutex schemaMutex;
 
   friend class SchemaParser;
   friend class ValueReader;
@@ -164,6 +165,8 @@ class Schema {
  public:
   Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
          std::vector<SchemaField> &fields);
+
+  Schema(const Schema &obj);
 
   Schema buildPartialSchema(PartialRowMeta *partialMetaPtr);
 

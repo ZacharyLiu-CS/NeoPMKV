@@ -29,10 +29,15 @@ struct AsyncBufferEntry {
   Value _entry_content;
 
   AsyncBufferEntry(uint32_t entry_size);
-  inline bool getContentReady();
-  inline void consumeContent();
-  inline bool copyContent(TimeStamp oldTS, TimeStamp newTS,
-                          IndexerIterator iter, const Value &src);
+  bool copyContent(TimeStamp oldTS, TimeStamp newTS, IndexerIterator iter,
+                   const Value &src);
+
+  inline bool getContentReady() {
+    return _entryReady.load(std::memory_order_acquire);
+  }
+  inline void consumeContent() {
+    _entryReady.store(false, std::memory_order_release);
+  }
 };
 
 // async buffer queue

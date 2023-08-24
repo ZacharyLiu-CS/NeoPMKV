@@ -84,7 +84,24 @@ Schema::Schema(std::string name, uint32_t schemaId, uint32_t primaryKeyField,
     nameMap.insert({fields[sid].name, sid});
   }
 }
+
+Schema::Schema(const Schema &obj) {
+  name = obj.name;
+  latestVersion = obj.latestVersion;
+  schemaId = obj.schemaId;
+  primaryKeyField = obj.primaryKeyField;
+  size = obj.size;
+  allFieldSize = obj.allFieldSize;
+  hasVariableField = obj.hasVariableField;
+  fields = obj.fields;
+  fieldsMeta = obj.fieldsMeta;
+  nameMap = obj.nameMap;
+  deletedField = obj.deletedField;
+  addedField = obj.addedField;
+}
+
 bool Schema::addFieldImpl(SchemaField &&field) {
+  std::lock_guard<std::mutex> _addField(schemaMutex);
   fields.push_back(field);
   bool isVariableField = field.type == FieldType::VARSTR;
   FieldMetaData fMeta = FieldMetaData{.fieldSize = field.size,
@@ -100,6 +117,7 @@ bool Schema::addFieldImpl(SchemaField &&field) {
 }
 
 bool Schema::deleteFieldImpl(SchemaId sid) {
+  std::lock_guard<std::mutex> _deleteField(schemaMutex);
   deletedField.insert(sid);
   fieldsMeta[sid].isDeleted = true;
   return true;

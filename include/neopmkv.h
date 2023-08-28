@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include "buffer_page.h"
+#include "kv_type.h"
 #include "logging.h"
 #include "mempool.h"
 #include "pbrb.h"
@@ -73,8 +74,8 @@ class NeoPMKV {
                         string name);
   // DML (data manipulation language)
   Schema *QuerySchema(SchemaId sid);
-  bool AddField(SchemaId sid, SchemaField &sField);
-  bool DeleteField(SchemaId sid, SchemaId fieldId);
+  SchemaVer AddField(SchemaId sid, SchemaField &sField);
+  SchemaVer DropField(SchemaId sid, SchemaId fieldId);
 
   // DQL (data query language)
   bool MultiPartialGet(Key &key, vector<Value> &value,
@@ -83,6 +84,7 @@ class NeoPMKV {
   bool Get(Key &key, Value &value);
 
   bool Put(const Key &key, vector<Value> &fieldList);
+  bool Put(const Key &key, Value&value);
 
   bool PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId);
   bool MultiPartialUpdate(Key &key, vector<Value> &fieldValues,

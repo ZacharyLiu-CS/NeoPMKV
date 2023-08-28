@@ -34,13 +34,16 @@ SchemaId NeoPMKV::CreateSchema(vector<SchemaField> fields,
 }
 // DML (data manipulation language)
 Schema *NeoPMKV::QuerySchema(SchemaId sid) { return _sMap.find(sid); }
-bool NeoPMKV::AddField(SchemaId sid, SchemaField &sField) {
+
+SchemaVer NeoPMKV::AddField(SchemaId sid, SchemaField &sField) {
   Schema *schemaPtr = _sMap.find(sid);
-  return schemaPtr->addField(sField);
+  bool s = schemaPtr->addField(sField);
+  return schemaPtr->getVersion();
 }
-bool NeoPMKV::DeleteField(SchemaId sid, SchemaId fieldId) {
+SchemaVer NeoPMKV::DropField(SchemaId sid, SchemaId fieldId) {
   Schema *schemaPtr = _sMap.find(sid);
-  return schemaPtr->dropField(fieldId);
+  bool s = schemaPtr->dropField(fieldId);
+  return schemaPtr->getVersion();
 }
 
 bool NeoPMKV::getValueHelper(IndexerIterator &idxIter,
@@ -352,7 +355,10 @@ bool NeoPMKV::MultiPartialGet(Key &key, vector<string> &value,
                       overall_timer.duration());
   return status;
 }
-
+bool NeoPMKV::Put(const Key &key, Value &value) {
+  Schema *schemaPtr = _sMap.find(key.getSchemaId());
+  return putNewValue(key, value);
+}
 bool NeoPMKV::Put(const Key &key, vector<Value> &fieldList) {
   Schema *schemaPtr = _sMap.find(key.getSchemaId());
   std::string value = _sParser[key.getSchemaId()]->ParseFromUserWriteToSeq(

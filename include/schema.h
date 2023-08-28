@@ -90,7 +90,9 @@ inline char *skipPartialRowMeta(char *src) {
 struct SchemaField {
   FieldType type;
   std::string name;
+  std::string defaultValue;
   uint32_t size = 0;
+
 
   SchemaField() = delete;
   SchemaField(FieldType type_, std::string name_, uint32_t size_)
@@ -101,9 +103,10 @@ struct SchemaField {
     }
   }
 
-  SchemaField(FieldType type, std::string name) {
+  SchemaField(FieldType type, std::string name, std::string defaultValue = "") {
     this->type = type;
     this->name = name;
+    this->defaultValue = defaultValue;
     this->size = FTSize[(uint8_t)type];
   }
 };

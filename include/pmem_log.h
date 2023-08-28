@@ -47,7 +47,8 @@ class PmemLog : public PmemEngine {
 
   Status append(PmemAddress &pmemAddr, const char *value,
                 uint32_t size) override;
-
+  Status append(PmemAddress &pmemAddr, const char *value, uint32_t size,
+                bool noHead) override;
   Status write(PmemAddress writeAddr, const char *value,
                uint32_t size) override;
 
@@ -67,7 +68,7 @@ class PmemLog : public PmemEngine {
   inline PmemAddress _append(char *srcdata, size_t len) {
     uint64_t now_tail_offset = _tail_offset.fetch_add(len);
     if ((1 + _active_chunk_id.load()) * _plog_meta.chunk_size <
-        now_tail_offset + len ) {
+        now_tail_offset + len) {
       _mutex.lock();
       _addNewChunk();
       now_tail_offset = _tail_offset.fetch_add(len);

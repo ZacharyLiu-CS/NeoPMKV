@@ -89,7 +89,21 @@ Status PmemLog::init(PmemEngineConfig &plog_meta) {
   }
   return PmemStatuses::S201_Created_Engine;
 }
+Status PmemLog::append(PmemAddress &pmemAddr, const char *value, uint32_t size,
+                       bool noHead) {
+  if (noHead == true) {
+    std::string write_value;
 
+    write_value.resize(size + NKV::ROW_META_HEAD_SIZE);
+    NKV::RowMetaPtr(const_cast<char *>(write_value.data()))
+        ->setMeta(size, NKV::RowType::FULL_DATA, 0, 0);
+    memcpy(NKV::skipRowMeta(const_cast<char *>(write_value.data())), value,
+           size);
+    return this->append(pmemAddr, write_value.c_str(),
+                        size + NKV::ROW_META_HEAD_SIZE);
+  }
+  return this->append(pmemAddr, value, size);
+}
 Status PmemLog::append(PmemAddress &pmemAddr, const char *value,
                        uint32_t size) {
   PmemSize append_size = size + sizeof(uint32_t);

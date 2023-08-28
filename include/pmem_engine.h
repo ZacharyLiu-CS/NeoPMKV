@@ -179,6 +179,8 @@ class PmemEngine {
   virtual Status init(PmemEngineConfig& plog_meta) = 0;
   // pmemAddr is the output parameter
   virtual Status append(PmemAddress &pmemAddr, const char *value, uint32_t size) = 0;
+
+  virtual Status append(PmemAddress &pmemAddr, const char *value, uint32_t size, bool noHead) = 0;
   // pmemAddr is the input parameter
   virtual Status write(PmemAddress writeAddr, const char *value, uint32_t size) = 0;
 

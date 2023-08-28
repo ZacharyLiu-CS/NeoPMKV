@@ -464,10 +464,10 @@ bool PBRB::read(TimeStamp oldTS, TimeStamp newTS, const RowAddr addr,
   ValueReader fieldReader(schema);
   for (uint32_t i = 0; i < fields.size(); i++) {
     bool s = fieldReader.ExtractFieldFromFullRow(valuePtr, fields[i], values[i]);
-    if (s == false) {
-      fieldReader.ExtractFieldFromPmemRow(pagePtr->getPlogAddrRow(addr),
-                                          _enginePtr, fields[i], values[i]);
-    }
+    // if (s == false) {
+    //   fieldReader.ExtractFieldFromPmemRow(pagePtr->getPlogAddrRow(addr),
+    //                                       _enginePtr, fields[i], values[i]);
+    // }
   }
   NKV_LOG_D(std::cout,
             "PBRB: Successfully read row [ts: {}, value: {}, value.size(): {}]",

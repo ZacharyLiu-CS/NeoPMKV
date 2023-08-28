@@ -53,6 +53,7 @@ class PmemLog : public PmemEngine {
                uint32_t size) override;
 
   Status read(PmemAddress readAddr, std::string &value) override;
+  Status read(PmemAddress readAddr, std::string &value, bool noHead) override;
 
   Status read(PmemAddress readAddr, std::string &value, Schema *schemPtr,
               uint32_t fieldId) override;

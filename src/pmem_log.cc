@@ -126,6 +126,15 @@ Status PmemLog::write(PmemAddress writeAddr, const char *value, uint32_t size) {
   _write(writeAddr, value, size);
   return PmemStatuses::S200_OK_Write;
 }
+
+Status PmemLog::read(PmemAddress readAddr, std::string &value, bool noHead) {
+  auto s = this->read(readAddr, value);
+  if (noHead == true) {
+    value.assign(value.substr(NKV::ROW_META_HEAD_SIZE, -1));
+    return s;
+  }
+  return s;
+}
 Status PmemLog::read(PmemAddress readAddr, std::string &value) {
   // checkout the effectiveness of start_offset
   if (readAddr > _tail_offset.load()) {

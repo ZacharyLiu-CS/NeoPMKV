@@ -109,7 +109,11 @@ inline void EncodeToVarFieldOffset(void *dst, uint64_t contentOffset,
   dstPtr->contentSize = size;
   dstPtr->contentOffset = contentOffset;
 }
-
+inline uint64_t GetVarFieldOffset(void *dst) {
+  auto s = reinterpret_cast<VarFieldContent *>(dst);
+  assert(s->contentType == VarFieldType::ROW_OFFSET);
+  return s->contentOffset;
+}
 inline uint32_t GetVarFieldSize(void *dst) {
   return reinterpret_cast<VarFieldContent *>(dst)->contentSize;
 }

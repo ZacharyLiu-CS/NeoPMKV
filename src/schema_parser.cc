@@ -166,7 +166,6 @@ bool SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
 
   // copy the varbaile field content
   bool noSpace = false;
-  char *rowVarPartPtr = seqValue.data() + rowFixedPartSize;
   for (auto &i : schemaPtr->fieldsMeta) {
     // not variable field, do nothing
     if (i.isVariable == false) {
@@ -190,7 +189,8 @@ bool SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
     // let's start to move
     try {
       void *varSpacePtr = _globalPool->Malloc(varFieldSize);
-      memcpy(varSpacePtr, rowVarPartPtr, varFieldSize);
+      uint64_t varFieldOffset = GetVarFieldOffset(fieldPtr);
+      memcpy(varSpacePtr, fieldPtr + varFieldOffset, varFieldSize);
       EncodeToVarFieldOnlyPointer(fieldPtr, varSpacePtr, varFieldSize);
     } catch (std::bad_alloc &ba) {
       noSpace = true;

@@ -433,6 +433,7 @@ bool NeoPMKV::PartialUpdate(Key &key, Value &fieldValue, uint32_t fieldId) {
       iSize = schemaPtr->getSize(fieldId);
     _engine_ptr->write(oldPmemAddr + iOffset, fieldValue.data(), iSize);
     vPtr->setFullColdPmemAddr(oldPmemAddr);
+    return true;
   }
 
   return updateFullValue(idxIter, indexer, key, pValue);
@@ -472,6 +473,7 @@ bool NeoPMKV::MultiPartialUpdate(Key &key, vector<Value> &fieldValues,
       _engine_ptr->write(oldPmemAddr + iOffset, fieldValues[i].data(), iSize);
     }
     vPtr->setFullColdPmemAddr(oldPmemAddr);
+    return true;
   }
   return updateFullValue(idxIter, indexer, key, pValue);
 }

@@ -6,6 +6,7 @@
 //
 
 #include "schema_parser.h"
+#include <cstddef>
 #include <cstring>
 #include <map>
 #include <queue>
@@ -42,7 +43,8 @@ std::string SchemaParser::ParseFromUserWriteToSeq(
   // do the movement
   char *destPtr = result.data();
   RowMetaPtr(destPtr)->setMeta(contentSize, RowType::FULL_DATA,
-                               schemaPtr->getSchemaId(), schemaPtr->getVersion());
+                               schemaPtr->getSchemaId(),
+                               schemaPtr->getVersion());
 
   destPtr = skipRowMeta(destPtr);
   char *startPtr = destPtr;
@@ -149,7 +151,8 @@ bool SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
   uint32_t rowVarPartSize = seqValue.size() - rowFixedPartSize;
   RowMetaPtr(seqValue.data())
       ->setMeta(schemaPtr->getAllFieldSize() + rowVarPartSize,
-                RowType::FULL_FIELD, schemaPtr->getSchemaId(), schemaPtr->getVersion());
+                RowType::FULL_FIELD, schemaPtr->getSchemaId(),
+                schemaPtr->getVersion());
 
   char *fieldPtr = skipRowMeta(seqValue.data());
   if (schemaPtr->hasVarField() == false) {
@@ -187,15 +190,15 @@ bool SchemaParser::ParseFromSeqToTwoPart(Schema *schemaPtr,
     }
 
     // let's start to move
-    try {
-      void *varSpacePtr = _globalPool->Malloc(varFieldSize);
-      uint64_t varFieldOffset = GetVarFieldOffset(fieldPtr);
-      memcpy(varSpacePtr, fieldPtr + varFieldOffset, varFieldSize);
-      EncodeToVarFieldOnlyPointer(fieldPtr, varSpacePtr, varFieldSize);
-    } catch (std::bad_alloc &ba) {
+    void *varSpacePtr = _globalPool->Malloc(varFieldSize);
+    if (varSpacePtr == nullptr) {
       noSpace = true;
       EncodeToVarFieldNotCache(fieldPtr);
+      continue;
     }
+    uint64_t varFieldOffset = GetVarFieldOffset(fieldPtr);
+    memcpy(varSpacePtr, fieldPtr + varFieldOffset, varFieldSize);
+    EncodeToVarFieldOnlyPointer(fieldPtr, varSpacePtr, varFieldSize);
     fieldPtr += i.fieldSize;
   }
   seqValue.resize(rowFixedPartSize);
